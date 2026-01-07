@@ -1,0 +1,10 @@
+{
+    "display_name": "오토픽",
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "author": "anon",
+    "version": "1.3.1",
+    "homePage": "https://github.com/SillyGgu/AutoPic",
+    "auto_update": true
+}
