@@ -402,9 +402,10 @@ function renderCharacterPrompts() {
 
     charData.forEach((item, index) => {
         const slotNum = index + 1;
-        const isEnabled = item.enabled !== false; // 기본값은 true로 설정
+        const isEnabled = item.enabled !== false; 
+        // 배경색을 var(--ap-bg-item)으로 변경하여 테마에 대응
         const html = `
-            <div class="char-prompt-item" style="background: rgba(0,0,0,0.15); padding: 12px; border-radius: 8px; border: 1px solid var(--ap-border);">
+            <div class="char-prompt-item" style="background: var(--ap-bg-item); padding: 12px; border-radius: 8px; border: 1px solid var(--ap-border);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <label class="gen-checkbox-label" style="margin:0; cursor:pointer; display:flex; align-items:center; gap:8px;">
                         <input type="checkbox" class="char-enabled-checkbox" data-index="${index}" ${isEnabled ? 'checked' : ''}>
@@ -420,21 +421,19 @@ function renderCharacterPrompts() {
         $list.append(html);
     });
 
-    // 프롬프트 내용 입력 이벤트
+    // 이벤트 바인딩 부분 유지
     $('.char-prompt-input').off('input').on('input', function() {
         const idx = $(this).data('index');
         charData[idx].prompt = $(this).val();
         saveSettingsDebounced();
     });
 
-    // 토글(On/Off) 변경 이벤트
     $('.char-enabled-checkbox').off('change').on('change', function() {
         const idx = $(this).data('index');
         charData[idx].enabled = $(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    // 삭제 버튼 이벤트
     $('.remove-char-prompt-btn').off('click').on('click', function() {
         const idx = $(this).data('index');
         charData.splice(idx, 1);
@@ -519,7 +518,7 @@ function renderAllLinkedPresetsList() {
 
     const linked = extension_settings[extensionName].linkedPresets;
     if (!linked || Object.keys(linked).length === 0) {
-        $container.append('<div style="padding: 15px; text-align: center; font-size: 0.85rem; color: var(--color-text-vague);">연동된 캐릭터가 없습니다.</div>');
+        $container.append('<div style="padding: 15px; text-align: center; font-size: 0.85rem; color: var(--ap-text-vague);">연동된 캐릭터가 없습니다.</div>');
         return;
     }
 
@@ -530,14 +529,14 @@ function renderAllLinkedPresetsList() {
         const presetName = linked[avatarFile];
         const charName = avatarToName[avatarFile] || `(알 수 없음: ${avatarFile})`;
         
+        // 구조를 gen-linked-item 클래스에 맞춰 정렬
         const $item = $(`
             <div class="gen-linked-item">
-                <div style="font-size: 0.85rem; color: var(--color-text); flex: 1; min-width: 0;">
-                    <div style="font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${charName}</div>
-                    <div style="color: #4a90e2; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${presetName}</div>
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                    <span style="font-weight: bold; font-size: 0.85rem; color: var(--ap-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${charName}</span>
+                    <span style="color: var(--ap-accent); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${presetName}</span>
                 </div>
-                <!-- 버튼에 gen-btn, gen-btn-red 클래스 추가 및 구조 개선 -->
-                <button class="gen-btn gen-btn-red gen-delete-link-btn" data-avatar="${avatarFile}">삭제</button>
+                <button class="gen-btn gen-btn-red gen-delete-link-btn" data-avatar="${avatarFile}" style="padding: 5px 10px; font-size: 0.75rem; flex-shrink: 0;">삭제</button>
             </div>
         `);
 
