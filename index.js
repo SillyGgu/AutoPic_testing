@@ -12,7 +12,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 
 
-const extensionName = 'AutoPic';
+const extensionName = 'AutoPic_testing';
 const extensionFolderPath = `/scripts/extensions/third-party/${extensionName}`;
 
 
@@ -36,7 +36,7 @@ function escapeHtmlAttribute(value) {
         .replace(/>/g, '&gt;');
 }
 
-// 기본 설정
+
 const defaultAutoPicSettings = {
     insertType: INSERT_TYPE.DISABLED,
     lastNonDisabledType: INSERT_TYPE.INLINE, 
@@ -52,16 +52,14 @@ const defaultAutoPicSettings = {
         "Default": `<image_generation>\nYou must insert a <pic prompt="example prompt"> at end of the reply. Prompts are used for stable diffusion image generation, based on the plot and character to output appropriate prompts to generate captivating images.\n</image_generation>`
     },
     linkedPresets: {},
-    characterPrompts: {} // 캐릭터별 외형 프롬프트 저장소 추가
+    characterPrompts: {}
 };
-// UI 업데이트
 function updateUI() {
     $('#autopic_menu_item').toggleClass(
         'selected',
         extension_settings[extensionName].insertType !== INSERT_TYPE.DISABLED,
     );
 
-    // 테마 적용
     const currentTheme = extension_settings[extensionName].theme || 'dark';
     applyTheme(currentTheme);
 
@@ -69,8 +67,8 @@ function updateUI() {
         if (!$('#prompt_injection_text').is(':focus')) {
             updatePresetSelect();
             renderCharacterLinkUI();
-            // 추가: 캐릭터 프롬프트 리스트도 함께 갱신
-            renderCharacterPrompts();
+
+            
             $('#prompt_injection_text').val(extension_settings[extensionName].promptInjection.prompt);
         }
 
@@ -80,13 +78,11 @@ function updateUI() {
         $('#prompt_injection_position').val(extension_settings[extensionName].promptInjection.position);
         $('#prompt_injection_depth').val(extension_settings[extensionName].promptInjection.depth);
         
-        // 테마 버튼 활성화 표시
         $('.theme-dot').removeClass('active');
         $(`.theme-dot[data-theme="${currentTheme}"]`).addClass('active');
     }
 }
 
-// 설정 로드
 async function loadSettings() {
     extension_settings[extensionName] = extension_settings[extensionName] || {};
 
@@ -137,7 +133,6 @@ async function createSettings(settingsHtml) {
         $('.image-gen-tab-content').removeClass('active');
         $('#' + targetTabId).addClass('active');
         
-        // 탭 이동 시마다 캐릭터 프롬프트 리스트 강제 갱신
         if (targetTabId === 'tab-gen-linking') renderCharacterLinkUI();
         if (targetTabId === 'tab-gen-templates') renderCharacterPrompts();
     });
@@ -158,23 +153,20 @@ async function createSettings(settingsHtml) {
         
         saveSettingsDebounced();
     });
-    // 주입 활성화 체크박스
     $('#prompt_injection_enabled').on('change', function () {
         extension_settings[extensionName].promptInjection.enabled = $(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    // [수정 핵심] 텍스트 입력 시 설정값만 업데이트하고 드롭다운은 건드리지 않음
     $('#prompt_injection_text').on('input', function () {
         const currentVal = $(this).val();
-        // 실제 설정 데이터 업데이트
+
         extension_settings[extensionName].promptInjection.prompt = currentVal;
         
-        // 입력 중에는 드롭다운을 건드리지 않고(초기화 방지) 저장만 수행
+
         saveSettingsDebounced();
     });
 
-    // 템플릿 선택 시 로드
     $('#prompt_preset_select').on('change', function() {
         const selectedKey = $(this).val();
         if (!selectedKey) return;
@@ -301,6 +293,15 @@ async function createSettings(settingsHtml) {
             $list.slideDown(200);
         }
     });
+    $('#gen-open-storage-mgmt-btn').off('click').on('click', function() {
+        const $list = $('#gen-storage-mgmt-list-container');
+        if ($list.is(':visible')) {
+            $list.slideUp(200);
+        } else {
+            renderStorageManagementList();
+            $list.slideDown(200);
+        }
+    });
 
     $('#prompt_injection_regex').on('input', function () {
         extension_settings[extensionName].promptInjection.regex = $(this).val();
@@ -346,8 +347,7 @@ function renderCharacterLinkUI() {
         $('#gen-remove-char-link-btn').show();
         
         const presetContent = extension_settings[extensionName].promptPresets[linkedPreset];
-        
-        // [수정] 입력창 포커스 중이 아닐 때만 캐릭터 연동 템플릿 내용을 반영합니다.
+
         if (!$('#prompt_injection_text').is(':focus')) {
             extension_settings[extensionName].promptInjection.prompt = presetContent;
             $('#prompt_injection_text').val(presetContent);
@@ -369,6 +369,9 @@ function renderCharacterLinkUI() {
 
 
 function renderCharacterPrompts() {
+
+    if ($('#char_prompts_list textarea:focus').length > 0) return;
+
     const context = getContext();
     const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
     const $list = $('#char_prompts_list');
@@ -390,11 +393,8 @@ function renderCharacterPrompts() {
     if (!extension_settings[extensionName].characterPrompts) {
         extension_settings[extensionName].characterPrompts = {};
     }
-    if (!extension_settings[extensionName].characterPrompts[avatarFile]) {
-        extension_settings[extensionName].characterPrompts[avatarFile] = [];
-    }
-
-    const charData = extension_settings[extensionName].characterPrompts[avatarFile];
+    
+    const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
 
     if (charData.length === 0) {
         $list.append('<div style="text-align:center; color:var(--ap-text-vague); font-size:0.8rem; padding: 10px;">등록된 캐릭터 프롬프트가 없습니다.</div>');
@@ -403,9 +403,9 @@ function renderCharacterPrompts() {
     charData.forEach((item, index) => {
         const slotNum = index + 1;
         const isEnabled = item.enabled !== false; 
-        // 배경색을 var(--ap-bg-item)으로 변경하여 테마에 대응
+        
         const html = `
-            <div class="char-prompt-item" style="background: var(--ap-bg-item); padding: 12px; border-radius: 8px; border: 1px solid var(--ap-border);">
+            <div class="char-prompt-item" style="background: var(--ap-bg-item); padding: 12px; border-radius: 8px; border: 1px solid var(--ap-border); position: relative;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <label class="gen-checkbox-label" style="margin:0; cursor:pointer; display:flex; align-items:center; gap:8px;">
                         <input type="checkbox" class="char-enabled-checkbox" data-index="${index}" ${isEnabled ? 'checked' : ''}>
@@ -414,14 +414,13 @@ function renderCharacterPrompts() {
                     <button class="remove-char-prompt-btn gen-btn gen-btn-red" data-index="${index}" style="padding:2px 8px; font-size:0.7rem;">삭제</button>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:8px;">
-                    <textarea class="gen-custom-input char-prompt-input" data-index="${index}" rows="2" placeholder="캐릭터 외형 프롬프트">${item.prompt || ''}</textarea>
+                    <textarea class="gen-custom-input char-prompt-input" data-index="${index}" rows="2" placeholder="캐릭터 외형 프롬프트" style="resize: vertical;">${item.prompt || ''}</textarea>
                 </div>
             </div>
         `;
         $list.append(html);
     });
 
-    // 이벤트 바인딩 부분 유지
     $('.char-prompt-input').off('input').on('input', function() {
         const idx = $(this).data('index');
         charData[idx].prompt = $(this).val();
@@ -442,7 +441,6 @@ function renderCharacterPrompts() {
     });
 }
 
-// "추가" 버튼 클릭 이벤트 (이벤트 위임 방식으로 수정하여 버튼이 나중에 생겨도 작동하게 함)
 $(document).off('click', '#add_char_prompt_btn').on('click', '#add_char_prompt_btn', function() {
     const context = getContext();
     const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
@@ -462,7 +460,6 @@ $(document).off('click', '#add_char_prompt_btn').on('click', '#add_char_prompt_b
         return;
     }
 
-    // regex 속성을 제거하고 enabled 속성을 추가
     extension_settings[extensionName].characterPrompts[avatarFile].push({ prompt: '', enabled: true });
     saveSettingsDebounced();
     renderCharacterPrompts();
@@ -525,11 +522,10 @@ function renderAllLinkedPresetsList() {
     const avatarToName = {};
     characters.forEach(c => avatarToName[c.avatar] = c.name);
 
-    Object.keys(linked).forEach(avatarFile => {
+	Object.keys(linked).forEach(avatarFile => {
         const presetName = linked[avatarFile];
         const charName = avatarToName[avatarFile] || `(알 수 없음: ${avatarFile})`;
         
-        // 구조를 gen-linked-item 클래스에 맞춰 정렬
         const $item = $(`
             <div class="gen-linked-item">
                 <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
@@ -551,7 +547,71 @@ function renderAllLinkedPresetsList() {
         $container.append($item);
     });
 }
+function renderStorageManagementList() {
+    const $container = $('#gen-storage-mgmt-list-container');
+    $container.empty();
 
+    const charPrompts = extension_settings[extensionName].characterPrompts || {};
+    const linkedPresets = extension_settings[extensionName].linkedPresets || {};
+
+    const allSavedAvatars = new Set([...Object.keys(charPrompts), ...Object.keys(linkedPresets)]);
+
+    if (allSavedAvatars.size === 0) {
+        $container.append('<div style="padding: 15px; text-align: center; font-size: 0.85rem; color: var(--ap-text-vague);">저장된 데이터가 없습니다.</div>');
+        return;
+    }
+
+    const avatarToName = {};
+    characters.forEach(c => avatarToName[c.avatar] = c.name);
+
+	allSavedAvatars.forEach(avatarFile => {
+        const charName = avatarToName[avatarFile];
+        const isDeleted = !charName;
+        const displayName = charName || `(삭제됨) ${avatarFile}`;
+        
+        const hasPrompt = charPrompts[avatarFile] && charPrompts[avatarFile].length > 0;
+        const hasLink = linkedPresets[avatarFile] !== undefined && linkedPresets[avatarFile] !== null;
+
+        if (!hasPrompt && !hasLink) {
+            return;
+        }
+
+        const $item = $(`
+            <div class="gen-linked-item" style="border-bottom: 1px solid var(--ap-border); padding: 10px 15px;">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="font-weight: bold; font-size: 0.85rem; color: ${isDeleted ? '#eb4d4b' : 'var(--ap-text)'}; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                        ${displayName}
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--ap-text-vague);">
+                        ${hasPrompt ? '외형 있음 ' : ''}${hasLink ? '연동 있음' : ''}
+                    </div>
+                </div>
+                <button class="gen-btn gen-btn-red gen-delete-storage-btn" data-avatar="${avatarFile}" style="padding: 4px 8px; font-size: 0.7rem; flex-shrink: 0;">
+                    <i class="fa-solid fa-eraser"></i> 데이터 삭제
+                </button>
+            </div>
+        `);
+
+        $item.find('.gen-delete-storage-btn').on('click', async function() {
+            const avatar = $(this).data('avatar');
+            const confirm = await callGenericPopup(
+                `'${displayName}' 캐릭터의 모든 저장된 데이터(외형 프롬프트 및 연동 설정)를 삭제하시겠습니까?`,
+                POPUP_TYPE.CONFIRM
+            );
+            if (confirm) {
+                delete extension_settings[extensionName].characterPrompts[avatar];
+                delete extension_settings[extensionName].linkedPresets[avatar];
+                saveSettingsDebounced();
+                renderStorageManagementList();
+                renderCharacterLinkUI(); 
+                renderCharacterPrompts(); 
+                toastr.success(`${displayName} 데이터 삭제 완료`);
+            }
+        });
+
+        $container.append($item);
+    });
+}
 function updatePresetSelect(forceSelectedName = null) {
     const select = $('#prompt_preset_select');
     if (!select.length) return;
@@ -592,34 +652,28 @@ function getFinalPrompt() {
     const charId = context.characterId;
     const chat = context.chat;
 
-    // 1. 기본 템플릿 가져오기
     let finalPrompt = extension_settings[extensionName].promptInjection.prompt;
-    let activatedPrompts = []; // 작동된 프롬프트 정보를 저장할 배열
+    let activatedPrompts = []; 
 
     if (charId && characters[charId]) {
         const avatarFile = characters[charId].avatar;
         const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
 
-        // 연동된 템플릿이 있으면 그것을 기반으로 사용
         if (linkedPresetName && extension_settings[extensionName].promptPresets[linkedPresetName]) {
             finalPrompt = extension_settings[extensionName].promptPresets[linkedPresetName];
         }
 
-        // 2. 캐릭터 외형 프롬프트 ({autopic_charN}) 치환 로직
         const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
 
         charData.forEach((item, index) => {
             const placeholder = `{autopic_char${index + 1}}`;
             let replacement = "";
 
-            // 토글이 활성화되어 있고 프롬프트 내용이 있는 경우에만 치환 수행
             if (item.enabled !== false && item.prompt && item.prompt.trim()) {
                 replacement = item.prompt;
                 activatedPrompts.push({ slot: index + 1, content: replacement });
             }
-            
-            // 프롬프트 내의 플레이스 홀더를 실제 프롬프트 또는 빈 값으로 치환
-            // (꺼져있거나 내용이 없으면 placeholder가 삭제되어 AI에게 보이지 않게 됨)
+
             finalPrompt = finalPrompt.split(placeholder).join(replacement);
         });
     }
@@ -881,7 +935,7 @@ $(function () {
 
         $('#extensions-settings-button').on('click', () => setTimeout(updateUI, 200));
 
-        eventSource.on(event_types.MESSAGE_RENDERED, (mesId) => {
+		eventSource.on(event_types.MESSAGE_RENDERED, (mesId) => {
             const context = getContext();
             const message = context.chat[mesId];
             if (message && !message.is_user && !message.extra?.title) {
@@ -895,6 +949,7 @@ $(function () {
             }
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
+            attachSwipeRerollListeners(mesId);
         });
 
         eventSource.on(event_types.MESSAGE_UPDATED, (mesId) => {
@@ -911,6 +966,7 @@ $(function () {
             }
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
+            attachSwipeRerollListeners(mesId);
         });
 
         eventSource.on(event_types.CHAT_CHANGED, () => {
@@ -948,14 +1004,24 @@ $(function () {
             }
         }, true);
 
-        $(document).on('click', '.image-reroll-button', function (e) {
+        $(document).on('click', '.image-reroll-button, .mes_img_swipe_counter', function (e) {
+            if ($(this).hasClass('mes_img_swipe_counter')) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+
             const messageBlock = $(this).closest('.mes');
             const mesId = messageBlock.attr('mesid');
+            
             let $visibleImg = messageBlock.find('.mes_img_container:not([style*="display: none"]) img.mes_img');
+            
             if ($visibleImg.length === 0) $visibleImg = messageBlock.find('img.mes_img').first();
+            
             const imgTitle = $visibleImg.attr('title') || $visibleImg.attr('alt') || "";
+            
             handleReroll(mesId, imgTitle);
         });
+
 
     })();
 });
@@ -1057,6 +1123,27 @@ function addMobileToggleToMessage(mesId) {
         if (!$(this).find('.mobile-ui-toggle').length) {
             $(this).append(`<div class="mobile-ui-toggle">⚙</div>`);
         }
+    });
+}
+
+/**
+ * 스와이프 버튼 및 카운터 클릭 시 리롤 모달을 강제로 연결하는 함수
+ */
+function attachSwipeRerollListeners(mesId) {
+    const $message = $(`.mes[mesid="${mesId}"]`);
+    
+    const $swipeElements = $message.find('.mes_img_swipe_left, .mes_img_swipe_right, .mes_img_swipe_counter');
+    
+    $swipeElements.off('click.autopic').on('click.autopic', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        let $visibleImg = $message.find('.mes_img_container:not([style*="display: none"]) img.mes_img');
+        if ($visibleImg.length === 0) $visibleImg = $message.find('img.mes_img').first();
+        
+        const imgTitle = $visibleImg.attr('title') || $visibleImg.attr('alt') || "";
+        
+        handleReroll(mesId, imgTitle);
     });
 }
 async function handleReroll(mesId, currentPrompt) {

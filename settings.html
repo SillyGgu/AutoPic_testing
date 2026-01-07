@@ -105,37 +105,50 @@
 			</div>
 		</div>
 
-        <div id="tab-gen-linking" class="image-gen-tab-content">
-            <div class="image-gen-card">
-                <h3 class="gen-section-title">🔗 캐릭터별 프롬프트 연동</h3>
-                <p style="font-size: 0.85rem; color: #aaaaaa; margin-bottom: 15px; line-height: 1.4;">
-                    특정 캐릭터에게 특화된 프롬프트 템플릿을 지정할 수 있습니다.
-                </p>
-                
-                <div style="background: #121214; padding: 15px; border-radius: 10px; border: 1px solid #333336; margin-bottom: 15px;">
-                    <div id="gen-char-link-info-area" style="font-size: 0.9rem; line-height: 1.6; color: #eeeeee;">
-                        캐릭터 정보를 불러오는 중...
-                    </div>
-                </div>
+		<div id="tab-gen-linking" class="image-gen-tab-content">
+			<div class="image-gen-card">
+				<h3 class="gen-section-title">🔗 캐릭터별 프롬프트 연동</h3>
+				<p style="font-size: 0.85rem; color: var(--ap-text-vague); margin-bottom: 15px; line-height: 1.4;">
+					특정 캐릭터에게 특화된 프롬프트 템플릿을 지정할 수 있습니다.
+				</p>
+				
+				<div style="background: var(--ap-bg-input); padding: 15px; border-radius: 10px; border: 1px solid var(--ap-border); margin-bottom: 15px;">
+					<div id="gen-char-link-info-area" style="font-size: 0.9rem; line-height: 1.6; color: var(--ap-text);">
+						캐릭터 정보를 불러오는 중...
+					</div>
+				</div>
 
-                <div class="flex-container flexGap10">
-                    <button id="gen-save-char-link-btn" class="gen-btn gen-btn-blue flex2" style="height: 42px; font-weight: bold;">
-                        <i class="fa-solid fa-link"></i> 현재 캐릭터에 연동
-                    </button>
-                    <button id="gen-remove-char-link-btn" class="gen-btn gen-btn-gray flex1" style="height: 42px;">
-                        연동 해제
-                    </button>
-                </div>
+				<div class="flex-container flexGap10">
+					<button id="gen-save-char-link-btn" class="gen-btn gen-btn-blue flex2" style="height: 42px; font-weight: bold;">
+						<i class="fa-solid fa-link"></i> 현재 캐릭터에 연동
+					</button>
+					<button id="gen-remove-char-link-btn" class="gen-btn gen-btn-gray flex1" style="height: 42px;">
+						연동 해제
+					</button>
+				</div>
+				<div style="margin-top: 25px; border-top: 1px solid var(--ap-border); padding-top: 20px;">
+					<h3 class="gen-section-title">💾 저장된 데이터 관리</h3>
+					<p style="font-size: 0.8rem; color: var(--ap-text-vague); margin-bottom: 12px;">
+						캐릭터별로 저장된 외형 프롬프트 및 연동 정보를 관리합니다. 삭제된 캐릭터의 잔여 데이터도 여기서 지울 수 있습니다.
+					</p>
+					<button id="gen-open-storage-mgmt-btn" class="gen-btn gen-btn-dark" style="width: 100%; justify-content: center; background: var(--ap-bg-input) !important;">
+						📂 저장된 캐릭터 데이터 목록 보기
+					</button>
+					<div id="gen-storage-mgmt-list-container" style="display: none; margin-top: 10px; max-height: 300px; overflow-y: auto; border: 1px solid var(--ap-border); border-radius: 8px; background: var(--ap-bg-input);">
+						<!-- 여기에 JS로 리스트 생성 -->
+					</div>
+				</div>
 
-                <div style="margin-top: 15px;">
-                    <button id="gen-toggle-linked-list-btn" class="gen-btn gen-btn-dark" style="width: 100%; justify-content: center;">
-                        📋 연동된 캐릭터 목록 확인
-                    </button>
-                    <div id="gen-linked-char-list-container" style="display: none; margin-top: 10px; max-height: 250px; overflow-y: auto; border: 1px solid #333336; border-radius: 8px; background: #121214;">
-                        </div>
-                </div>
-            </div>
-        </div>
+				<div style="margin-top: 15px;">
+					<button id="gen-toggle-linked-list-btn" class="gen-btn gen-btn-dark" style="width: 100%; justify-content: center; background: var(--ap-bg-input) !important;">
+						📋 연동된 캐릭터 목록 확인
+					</button>
+					<div id="gen-linked-char-list-container" style="display: none; margin-top: 10px; max-height: 250px; overflow-y: auto; border: 1px solid var(--ap-border); border-radius: 8px; background: var(--ap-bg-input);">
+						<!-- 여기에 JS로 리스트 생성 -->
+					</div>
+				</div>
+			</div>
+		</div>
 
     </div>
 </div>
@@ -183,10 +196,10 @@
     display: flex;
     flex-direction: column;
     gap: 15px;
-    max-height: 380px; /* 대략 3개 정도 노출되는 높이 */
+    max-height: 500px; /* 높이 제한 약간 상향 */
     overflow-y: auto;
-    padding-right: 5px;
-    border: 1px solid transparent; /* 스크롤바 공간 확보용 */
+    padding-right: 8px;
+    border: 1px solid transparent;
 }
 
 /* 스크롤바 커스텀 */
@@ -197,6 +210,13 @@
     background: var(--ap-border);
     border-radius: 10px;
 }
+
+.char-prompt-input {
+    min-height: 60px; /* 기본 최소 높이 설정 */
+    resize: vertical; /* 사용자가 세로 크기를 조절할 수 있도록 허용 */
+    width: 100%;
+}
+
 
 /* 3. 연동된 캐릭터 목록 아이템 디자인 (UI 깨짐 수정) */
 .gen-linked-item {
@@ -268,6 +288,7 @@
     border: 1px solid var(--ap-input-border) !important;
     border-radius: 8px !important; padding: 8px 12px !important;
     font-size: 0.9rem !important; outline: none !important; box-sizing: border-box;
+	
 }
 
 #autopic_settings_container select.gen-custom-input {
@@ -302,9 +323,8 @@
 #autopic_settings_container .image-gen-tab-content { display: none; }
 #autopic_settings_container .image-gen-tab-content.active { display: block; animation: fadeInGen 0.3s ease-out; }
 @keyframes fadeInGen { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
 @media screen and (max-width: 500px) {
     #autopic_settings_container .flex-container.flexnowrap { flex-wrap: wrap !important; gap: 8px !important; }
-    #autopic_settings_container .gen-custom-input { width: 100% !important; }
+    #autopic_settings_container .gen-custom-input { width: 100%; } /* !important 제거하여 수동 리사이징 우선권 부여 */
 }
 </style>
