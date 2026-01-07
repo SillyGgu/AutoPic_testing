@@ -649,13 +649,10 @@ function updatePresetSelect(forceSelectedName = null) {
 
 function getFinalPrompt() {
     const context = getContext();
-    const charId = context.characterId;
-    const chat = context.chat;
-
+    const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
     let finalPrompt = extension_settings[extensionName].promptInjection.prompt;
-    let activatedPrompts = []; 
 
-    if (charId && characters[charId]) {
+    if (charId !== undefined && charId !== -1 && characters[charId]) {
         const avatarFile = characters[charId].avatar;
         const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
 
@@ -665,17 +662,21 @@ function getFinalPrompt() {
 
         const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
 
-        charData.forEach((item, index) => {
-            const placeholder = `{autopic_char${index + 1}}`;
+        for (let i = 1; i <= 6; i++) {
+            const placeholder = `{autopic_char${i}}`;
+            const item = charData[i - 1];
             let replacement = "";
 
-            if (item.enabled !== false && item.prompt && item.prompt.trim()) {
+            if (item && item.enabled !== false && item.prompt && item.prompt.trim()) {
                 replacement = item.prompt;
-                activatedPrompts.push({ slot: index + 1, content: replacement });
             }
 
             finalPrompt = finalPrompt.split(placeholder).join(replacement);
-        });
+        }
+    } else {
+        for (let i = 1; i <= 6; i++) {
+            finalPrompt = finalPrompt.split(`{autopic_char${i}}`).join("");
+        }
     }
 
     return finalPrompt;
