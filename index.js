@@ -69,6 +69,8 @@ function updateUI() {
         if (!$('#prompt_injection_text').is(':focus')) {
             updatePresetSelect();
             renderCharacterLinkUI();
+            // 추가: 캐릭터 프롬프트 리스트도 함께 갱신
+            renderCharacterPrompts();
             $('#prompt_injection_text').val(extension_settings[extensionName].promptInjection.prompt);
         }
 
@@ -368,7 +370,6 @@ function renderCharacterLinkUI() {
 
 function renderCharacterPrompts() {
     const context = getContext();
-    // 캐릭터 ID를 가져오는 방식을 더 명확하게 수정
     const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
     const $list = $('#char_prompts_list');
     
@@ -376,7 +377,6 @@ function renderCharacterPrompts() {
 
     $list.empty();
 
-    // 캐릭터가 선택되지 않았거나 로드 전인 경우 처리
     if (charId === undefined || charId === -1 || !characters[charId]) {
         $list.append('<div style="text-align:center; color:var(--ap-text-vague); font-size:0.8rem; padding: 20px;">캐릭터를 먼저 선택하거나 채팅을 시작해주세요.</div>');
         $('#add_char_prompt_btn').addClass('gen-btn-disabled').prop('disabled', true);
@@ -387,7 +387,6 @@ function renderCharacterPrompts() {
 
     const avatarFile = characters[charId].avatar;
     
-    // 데이터 구조 안전하게 초기화
     if (!extension_settings[extensionName].characterPrompts) {
         extension_settings[extensionName].characterPrompts = {};
     }
@@ -403,14 +402,17 @@ function renderCharacterPrompts() {
 
     charData.forEach((item, index) => {
         const slotNum = index + 1;
+        const isEnabled = item.enabled !== false; // 기본값은 true로 설정
         const html = `
             <div class="char-prompt-item" style="background: rgba(0,0,0,0.15); padding: 12px; border-radius: 8px; border: 1px solid var(--ap-border);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <span style="font-weight:bold; font-size:0.8rem; color:var(--ap-accent);">#${slotNum} - {autopic_char${slotNum}}</span>
+                    <label class="gen-checkbox-label" style="margin:0; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" class="char-enabled-checkbox" data-index="${index}" ${isEnabled ? 'checked' : ''}>
+                        <span style="font-weight:bold; font-size:0.8rem; color:var(--ap-accent);">#${slotNum} - {autopic_char${slotNum}}</span>
+                    </label>
                     <button class="remove-char-prompt-btn gen-btn gen-btn-red" data-index="${index}" style="padding:2px 8px; font-size:0.7rem;">삭제</button>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:8px;">
-                    <input type="text" class="gen-custom-input char-regex-input" data-index="${index}" placeholder="활성화 정규식 (예: 이름1, 이름2)" value="${escapeHtmlAttribute(item.regex || '')}">
                     <textarea class="gen-custom-input char-prompt-input" data-index="${index}" rows="2" placeholder="캐릭터 외형 프롬프트">${item.prompt || ''}</textarea>
                 </div>
             </div>
@@ -418,12 +420,17 @@ function renderCharacterPrompts() {
         $list.append(html);
     });
 
-    // 입력 이벤트 바인딩 (수정 즉시 저장)
-    $('.char-regex-input, .char-prompt-input').off('input').on('input', function() {
+    // 프롬프트 내용 입력 이벤트
+    $('.char-prompt-input').off('input').on('input', function() {
         const idx = $(this).data('index');
-        const isRegex = $(this).hasClass('char-regex-input');
-        if (isRegex) charData[idx].regex = $(this).val();
-        else charData[idx].prompt = $(this).val();
+        charData[idx].prompt = $(this).val();
+        saveSettingsDebounced();
+    });
+
+    // 토글(On/Off) 변경 이벤트
+    $('.char-enabled-checkbox').off('change').on('change', function() {
+        const idx = $(this).data('index');
+        charData[idx].enabled = $(this).prop('checked');
         saveSettingsDebounced();
     });
 
@@ -456,7 +463,8 @@ $(document).off('click', '#add_char_prompt_btn').on('click', '#add_char_prompt_b
         return;
     }
 
-    extension_settings[extensionName].characterPrompts[avatarFile].push({ prompt: '', regex: '' });
+    // regex 속성을 제거하고 enabled 속성을 추가
+    extension_settings[extensionName].characterPrompts[avatarFile].push({ prompt: '', enabled: true });
     saveSettingsDebounced();
     renderCharacterPrompts();
 });
@@ -587,11 +595,12 @@ function getFinalPrompt() {
 
     // 1. 기본 템플릿 가져오기
     let finalPrompt = extension_settings[extensionName].promptInjection.prompt;
+    let activatedPrompts = []; // 작동된 프롬프트 정보를 저장할 배열
 
     if (charId && characters[charId]) {
         const avatarFile = characters[charId].avatar;
         const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
-        
+
         // 연동된 템플릿이 있으면 그것을 기반으로 사용
         if (linkedPresetName && extension_settings[extensionName].promptPresets[linkedPresetName]) {
             finalPrompt = extension_settings[extensionName].promptPresets[linkedPresetName];
@@ -599,35 +608,21 @@ function getFinalPrompt() {
 
         // 2. 캐릭터 외형 프롬프트 ({autopic_charN}) 치환 로직
         const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
-        
-        // 마지막 메시지들을 텍스트로 결합 (정규식 감지용 - 최근 2~3개 메시지 정도)
-        const recentChatText = chat.slice(-3).map(m => m.mes).join(' ');
 
         charData.forEach((item, index) => {
             const placeholder = `{autopic_char${index + 1}}`;
             let replacement = "";
 
-            if (item.regex && item.regex.trim()) {
-                try {
-                    // 사용자 입력 정규식으로 감지 시도
-                    const searchRegex = new RegExp(item.regex, 'i');
-                    if (searchRegex.test(recentChatText)) {
-                        replacement = item.prompt || "";
-                        console.log(`[AutoPic] 감지 성공: ${placeholder} 활성화`);
-                    }
-                } catch (e) {
-                    console.error(`[AutoPic] 캐릭터 정규식 오류 (${placeholder}):`, e);
-                }
+            // 토글이 활성화되어 있고 프롬프트 내용이 있는 경우에만 치환 수행
+            if (item.enabled !== false && item.prompt && item.prompt.trim()) {
+                replacement = item.prompt;
+                activatedPrompts.push({ slot: index + 1, content: replacement });
             }
-
+            
             // 프롬프트 내의 플레이스 홀더를 실제 프롬프트 또는 빈 값으로 치환
+            // (꺼져있거나 내용이 없으면 placeholder가 삭제되어 AI에게 보이지 않게 됨)
             finalPrompt = finalPrompt.split(placeholder).join(replacement);
         });
-    }
-
-    // 남아있는 미사용 플레이스 홀더 제거
-    for (let i = 1; i <= 6; i++) {
-        finalPrompt = finalPrompt.split(`{autopic_char${i}}`).join("");
     }
 
     return finalPrompt;
@@ -919,7 +914,10 @@ $(function () {
             addMobileToggleToMessage(mesId);
         });
 
-        eventSource.on(event_types.CHAT_CHANGED, () => renderCharacterLinkUI());
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+			renderCharacterLinkUI();
+			renderCharacterPrompts();
+		});
 
         /* -------------------------------------------------------
          * 모바일 전용: 돋보기 차단 및 UI 토글 로직 (Capture phase)
