@@ -1133,11 +1133,11 @@ function addMobileToggleToMessage(mesId) {
 function attachSwipeRerollListeners(mesId) {
     const $message = $(`.mes[mesid="${mesId}"]`);
     
-    const $swipeElements = $message.find('.mes_img_swipe_left, .mes_img_swipe_right, .mes_img_swipe_counter');
+    const $swipeCounter = $message.find('.mes_img_swipe_counter');
     
-    $swipeElements.off('click.autopic').on('click.autopic', function (e) {
+    $swipeCounter.off('click.autopic').on('click.autopic', function (e) {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopPropagation(); 
         
         let $visibleImg = $message.find('.mes_img_container:not([style*="display: none"]) img.mes_img');
         if ($visibleImg.length === 0) $visibleImg = $message.find('img.mes_img').first();
