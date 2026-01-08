@@ -862,6 +862,17 @@ $(function () {
                     opacity: 0.6;
                 }
                 
+                .mes_img_swipe_left, .mes_img_swipe_right {
+                    min-width: 40px !important;
+                    min-height: 40px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    cursor: pointer !important;
+                    pointer-events: auto !important;
+                    z-index: 1001 !important;
+                }
+
                 @media (max-width: 1000px) {
                     .mes_media_wrapper {
                         margin-bottom: 45px !important;
@@ -871,27 +882,22 @@ $(function () {
                         opacity: 1 !important;
                         pointer-events: auto !important;
                         z-index: 1000 !important;
-                    }
-
-                    .mes_img_swipe_counter {
-                        font-size: 0.75rem !important;
-                        opacity: 1 !important;
-                        display: block !important;
-                        visibility: visible !important;
+                        background: rgba(0,0,0,0.3) !important;
+                        border-radius: 20px !important;
+                        padding: 0 10px !important;
                     }
 
                     .mes_img_swipe_left, .mes_img_swipe_right {
-                        opacity: 0.1 !important; 
-                        pointer-events: auto !important;
+                        opacity: 0.2 !important; /* 기본적으로 흐리게 보임 */
                         transition: opacity 0.2s !important;
                     }
 
+                    /* UI가 활성화되면 화살표를 진하게 표시 */
                     .mes_media_container.ui-active .mes_img_swipe_left,
                     .mes_media_container.ui-active .mes_img_swipe_right {
                         opacity: 1 !important;
                     }
                 }
-
                 @media (min-width: 1000px) {
                     .mobile-ui-toggle { display: none; }
                 }
@@ -979,8 +985,6 @@ $(function () {
          * 모바일 전용: 돋보기 차단 및 UI 토글 로직 (Capture phase)
          * ------------------------------------------------------- */
         document.addEventListener('click', function (e) {
-            if (window.innerWidth >= 1000) return;
-
             const target = e.target;
             const $mediaContainer = $(target).closest('.mes_media_container');
             
@@ -989,20 +993,24 @@ $(function () {
                 return;
             }
 
-            const isButton = $(target).closest('.mes_img_controls, .mes_img_swipes, .mobile-ui-toggle').length > 0;
+            const isButton = $(target).closest('.right_menu_button, .mes_img_controls, .mes_img_swipes, .mobile-ui-toggle').length > 0;
 
-            if (!$mediaContainer.hasClass('ui-active')) {
-                e.stopImmediatePropagation();
-                e.preventDefault();
-                $('.mes_media_container.ui-active').removeClass('ui-active');
-                $mediaContainer.addClass('ui-active');
-            } else {
+            if (window.innerWidth < 1000 && !$mediaContainer.hasClass('ui-active')) {
                 if (!isButton) {
                     e.stopImmediatePropagation();
                     e.preventDefault();
-                    $mediaContainer.removeClass('ui-active');
+                    $('.mes_media_container.ui-active').removeClass('ui-active');
+                    $mediaContainer.addClass('ui-active');
                 }
+                return;
             }
+
+            if (window.innerWidth < 1000 && $mediaContainer.hasClass('ui-active') && !isButton) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                $mediaContainer.removeClass('ui-active');
+            }
+            
         }, true);
 
         $(document).on('click', '.image-reroll-button, .mes_img_swipe_counter', function (e) {
@@ -1133,18 +1141,48 @@ function addMobileToggleToMessage(mesId) {
 function attachSwipeRerollListeners(mesId) {
     const $message = $(`.mes[mesid="${mesId}"]`);
     
-    const $swipeCounter = $message.find('.mes_img_swipe_counter');
+    // 왼쪽 화살표, 오른쪽 화살표, 그리고 중앙 숫자 카운터를 모두 감시 대상으로 지정
+    const $swipeControls = $message.find('.mes_img_swipe_left, .mes_img_swipe_right, .mes_img_swipe_counter');
     
-    $swipeCounter.off('click.autopic').on('click.autopic', function (e) {
-        e.preventDefault();
-        e.stopPropagation(); 
+    $swipeControls.off('click.autopic').on('click.autopic', function (e) {
+        const $counter = $message.find('.mes_img_swipe_counter');
+        const counterText = $counter.text().trim(); // 예: "1/1" 또는 "2/3"
         
-        let $visibleImg = $message.find('.mes_img_container:not([style*="display: none"]) img.mes_img');
-        if ($visibleImg.length === 0) $visibleImg = $message.find('img.mes_img').first();
+        // 현재 페이지 번호와 총 페이지 수 추출
+        const parts = counterText.split('/');
+        if (parts.length !== 2) return;
         
-        const imgTitle = $visibleImg.attr('title') || $visibleImg.attr('alt') || "";
+        const current = parseInt(parts[0]);
+        const total = parseInt(parts[1]);
         
-        handleReroll(mesId, imgTitle);
+        const isLeftArrow = $(this).hasClass('mes_img_swipe_left');
+        const isRightArrow = $(this).hasClass('mes_img_swipe_right');
+        const isCounter = $(this).hasClass('mes_img_swipe_counter');
+
+        let shouldTriggerReroll = false;
+
+        if (isCounter) {
+            shouldTriggerReroll = true;
+        } 
+        else if (isLeftArrow && current === 1) {
+            shouldTriggerReroll = true;
+        } 
+        else if (isRightArrow && current === total) {
+            shouldTriggerReroll = true;
+        }
+
+        if (shouldTriggerReroll) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            let $visibleImg = $message.find('.mes_img_container:not([style*="display: none"]) img.mes_img');
+            if ($visibleImg.length === 0) $visibleImg = $message.find('img.mes_img').first();
+            
+            const imgTitle = $visibleImg.attr('title') || $visibleImg.attr('alt') || "";
+            
+            handleReroll(mesId, imgTitle);
+        }
+
     });
 }
 async function handleReroll(mesId, currentPrompt) {
