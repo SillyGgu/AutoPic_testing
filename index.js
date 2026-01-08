@@ -163,10 +163,8 @@ async function createSettings(settingsHtml) {
         const context = getContext();
         const charId = context.characterId;
 
-        // 1. 기본 프롬프트 설정 업데이트
         extension_settings[extensionName].promptInjection.prompt = currentVal;
 
-        // 2. 만약 현재 캐릭터가 특정 템플릿에 연동되어 있다면, 그 템플릿 내용도 즉시 동기화
         if (charId && characters[charId]) {
             const avatarFile = characters[charId].avatar;
             const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
@@ -188,11 +186,6 @@ async function createSettings(settingsHtml) {
             
             $('#prompt_injection_text').val(content);
             extension_settings[extensionName].promptInjection.prompt = content;
-            
-            // 만약 현재 캐릭터가 다른 것에 연동되어 있었다면, 사용자 혼란을 막기 위해 
-            // 현재 선택한 템플릿으로 연동을 전환할지 여부는 저장 버튼 클릭 시 결정하도록 함.
-            // 여기서는 일단 입력창의 내용만 바꿈.
-
             saveSettingsDebounced();
         }
     });
