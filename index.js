@@ -160,9 +160,20 @@ async function createSettings(settingsHtml) {
 
     $('#prompt_injection_text').on('input', function () {
         const currentVal = $(this).val();
+        const context = getContext();
+        const charId = context.characterId;
 
+        // 1. 기본 프롬프트 설정 업데이트
         extension_settings[extensionName].promptInjection.prompt = currentVal;
-        
+
+        // 2. 만약 현재 캐릭터가 특정 템플릿에 연동되어 있다면, 그 템플릿 내용도 즉시 동기화
+        if (charId && characters[charId]) {
+            const avatarFile = characters[charId].avatar;
+            const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
+            if (linkedPresetName && extension_settings[extensionName].promptPresets[linkedPresetName] !== undefined) {
+                extension_settings[extensionName].promptPresets[linkedPresetName] = currentVal;
+            }
+        }
 
         saveSettingsDebounced();
     });
@@ -176,9 +187,12 @@ async function createSettings(settingsHtml) {
             const content = presets[selectedKey];
             
             $('#prompt_injection_text').val(content);
-            
             extension_settings[extensionName].promptInjection.prompt = content;
             
+            // 만약 현재 캐릭터가 다른 것에 연동되어 있었다면, 사용자 혼란을 막기 위해 
+            // 현재 선택한 템플릿으로 연동을 전환할지 여부는 저장 버튼 클릭 시 결정하도록 함.
+            // 여기서는 일단 입력창의 내용만 바꿈.
+
             saveSettingsDebounced();
         }
     });
@@ -329,10 +343,12 @@ async function createSettings(settingsHtml) {
 function renderCharacterLinkUI() {
     const context = getContext();
     const charId = context.characterId;
+    const $statusBadge = $('#prompt_edit_status');
     
     if (!charId || !characters[charId]) {
         $('#gen-char-link-info-area').html('<span style="color: var(--color-text-vague);">캐릭터 정보를 불러올 수 없습니다.</span>');
         $('#gen-save-char-link-btn').prop('disabled', true);
+        $statusBadge.text('전역 설정 편집 중').css('color', 'var(--ap-text-vague)');
         return;
     }
 
@@ -346,6 +362,9 @@ function renderCharacterLinkUI() {
         statusHtml += `<strong>연동된 템플릿:</strong> <span style="color: var(--accent-color); font-weight: bold;">${linkedPreset}</span>`;
         $('#gen-remove-char-link-btn').show();
         
+        // 상태 표시줄 업데이트
+        $statusBadge.html(`<i class="fa-solid fa-link"></i> ${character.name} 연동 템플릿 편집 중`).css('color', 'var(--ap-accent)');
+        
         const presetContent = extension_settings[extensionName].promptPresets[linkedPreset];
 
         if (!$('#prompt_injection_text').is(':focus')) {
@@ -357,6 +376,9 @@ function renderCharacterLinkUI() {
     else {
         statusHtml += `<strong>연동 상태:</strong> <span style="color: var(--color-text-vague);">없음 (전역 설정 사용 중)</span>`;
         $('#gen-remove-char-link-btn').hide();
+        
+        // 상태 표시줄 업데이트
+        $statusBadge.text('전역 설정 편집 중').css('color', 'var(--ap-text-vague)');
         
         if (!$('#prompt_injection_text').is(':focus')) {
             updatePresetSelect();
@@ -908,19 +930,75 @@ $(function () {
 				/* ===============================
 				   5. 태그 치환 모드 이미지 스타일 (Autopic 전용 클래스 적용)
 				================================ */
-				.mes_text img {
+				.mes_text img[data-autopic-id] {
 					border-radius: 12px !important;
 					margin: 10px 0 !important;
 					display: block !important;
 					max-width: 100% !important;
 					height: auto !important;
 					box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
-					border: 1px solid #333336 !important;
+					border: 1px solid var(--ap-border, #333336) !important;
 					transition: transform 0.2s ease;
 				}
 
-				.mes_text img:hover {
+				.mes_text img[data-autopic-id]:hover {
 					transform: scale(1.01);
+				}
+
+				.autopic-tag-img-wrapper {
+					position: relative;
+					display: block; /* inline-block에서 변경하여 정렬 유지 */
+					max-width: fit-content;
+					margin: 10px 0;
+				}
+
+				/* 갤러리 컨트롤 스타일과 통일 */
+				.autopic-tag-controls {
+					position: absolute;
+					top: 5px;
+					right: 10px;
+					display: flex;
+					gap: 6px;
+					opacity: 0;
+					transition: opacity 0.15s ease-in-out;
+					z-index: 10;
+					pointer-events: none;
+				}
+
+				.autopic-tag-img-wrapper:hover .autopic-tag-controls,
+				.autopic-tag-img-wrapper.ui-active .autopic-tag-controls {
+					opacity: 1;
+					pointer-events: auto;
+				}
+
+				.autopic-control-btn {
+					background: none !important; /* 배경 제거 */
+					width: 28px !important;
+					height: 28px !important;
+					display: flex !important;
+					align-items: center !important;
+					justify-content: center !important;
+					color: rgba(255, 255, 255, 0.95) !important;
+					font-size: 15px !important;
+					text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; /* 가독성을 위한 그림자 */
+					cursor: pointer;
+					border: none !important;
+					padding: 0 !important;
+				}
+
+				.autopic-control-btn:hover {
+					color: var(--ap-accent, #4a90e2) !important;
+					transform: scale(1.1);
+				}
+
+				/* 모바일 대응: 본문 이미지도 클릭 시 UI 토글 */
+				@media (max-width: 1000px) {
+					.autopic-tag-controls {
+						opacity: 0.8;
+						background: rgba(0,0,0,0.3);
+						border-radius: 8px;
+						padding: 2px;
+					}
 				}
             </style>
         `);
@@ -957,6 +1035,7 @@ $(function () {
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
+            setTimeout(() => attachTagControls(mesId), 150);
         });
 
         eventSource.on(event_types.MESSAGE_UPDATED, (mesId) => {
@@ -974,6 +1053,7 @@ $(function () {
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
+            setTimeout(() => attachTagControls(mesId), 150);
         });
 
         eventSource.on(event_types.CHAT_CHANGED, () => {
@@ -1013,7 +1093,7 @@ $(function () {
             
         }, true);
 
-        $(document).on('click', '.image-reroll-button, .mes_img_swipe_counter', function (e) {
+        $(document).off('click', '.image-reroll-button, .mes_img_swipe_counter').on('click', '.image-reroll-button, .mes_img_swipe_counter', function (e) {
             if ($(this).hasClass('mes_img_swipe_counter')) {
                 e.stopPropagation();
                 e.preventDefault();
@@ -1029,6 +1109,14 @@ $(function () {
             const imgTitle = $visibleImg.attr('title') || $visibleImg.attr('alt') || "";
             
             handleReroll(mesId, imgTitle);
+        });
+
+        $(document).off('click', '.reroll-trigger').on('click', '.reroll-trigger', function(e) {
+            e.preventDefault(); 
+            e.stopPropagation();
+            const mesId = $(this).data('mesid');
+            const prompt = $(this).data('prompt');
+            handleReroll(mesId, prompt);
         });
 
 
@@ -1087,7 +1175,7 @@ async function handleLastImageReroll() {
     const chat = context.chat;
     
     const picRegex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g;
-    const imgRegex = /<img[^>]*\stitle="([^"]*)"[^>]*?>/g;
+    const imgRegex = /<img[^>]+>/g;
 
     for (let i = chat.length - 1; i >= 0; i--) {
         const message = chat[i];
@@ -1095,15 +1183,15 @@ async function handleLastImageReroll() {
 
         const hasPic = message.mes.match(picRegex);
         const hasImg = message.mes.match(imgRegex);
+        const hasExtra = message.extra && (message.extra.image || message.extra.image_swipes);
 
-        if (hasPic || hasImg) {
-            handleReroll(i, ""); 
-            return;
-        }
-
-        if (message.extra && (message.extra.image || message.extra.image_swipes)) {
-            const currentTitle = message.extra.title || "";
-            handleReroll(i, currentTitle);
+        if (hasPic || hasImg || hasExtra) {
+            let prompt = message.extra?.title || "";
+            if (!prompt && hasImg) {
+                const match = message.mes.match(/title="([^"]*)"/);
+                if (match) prompt = match[1];
+            }
+            handleReroll(i, prompt);
             return;
         }
     }
@@ -1141,14 +1229,12 @@ function addMobileToggleToMessage(mesId) {
 function attachSwipeRerollListeners(mesId) {
     const $message = $(`.mes[mesid="${mesId}"]`);
     
-    // 왼쪽 화살표, 오른쪽 화살표, 그리고 중앙 숫자 카운터를 모두 감시 대상으로 지정
     const $swipeControls = $message.find('.mes_img_swipe_left, .mes_img_swipe_right, .mes_img_swipe_counter');
     
     $swipeControls.off('click.autopic').on('click.autopic', function (e) {
         const $counter = $message.find('.mes_img_swipe_counter');
         const counterText = $counter.text().trim(); // 예: "1/1" 또는 "2/3"
         
-        // 현재 페이지 번호와 총 페이지 수 추출
         const parts = counterText.split('/');
         if (parts.length !== 2) return;
         
@@ -1196,9 +1282,8 @@ async function handleReroll(mesId, currentPrompt) {
     if (!message) return;
 
     const currentInsertType = extension_settings[extensionName].insertType;
-
     const picRegex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g;
-    const imgRegex = /<img[^>]*\ssrc="([^"]*)"[^>]*\stitle="([^"]*)"[^>]*?>/g;
+    const imgRegex = /<img[^>]+>/g;
     
     let foundItems = []; 
 
@@ -1209,7 +1294,12 @@ async function handleReroll(mesId, currentPrompt) {
 
     let imgMatches = [...message.mes.matchAll(imgRegex)];
     imgMatches.forEach(m => {
-        foundItems.push({ originalTag: m[0], prompt: m[2], type: 'tag' });
+        const fullTag = m[0];
+        const titleMatch = fullTag.match(/title="([^"]*)"/);
+        const prompt = titleMatch ? titleMatch[1] : "";
+        if (fullTag.includes('data-autopic-id')) {
+            foundItems.push({ originalTag: fullTag, prompt: prompt, type: 'tag' });
+        }
     });
 
     if (message.extra && message.extra.image_swipes && message.extra.image_swipes.length > 0) {
@@ -1222,11 +1312,8 @@ async function handleReroll(mesId, currentPrompt) {
         });
     }
 
-    if (foundItems.length === 0 && currentPrompt) {
-        foundItems.push({ originalTag: null, prompt: currentPrompt, type: 'extra' });
-    }
     if (foundItems.length === 0) {
-        foundItems.push({ originalTag: null, prompt: "", type: 'extra' });
+        foundItems.push({ originalTag: null, prompt: currentPrompt || "", type: 'extra' });
     }
 
     let selectedIdx = 0;
@@ -1260,6 +1347,7 @@ async function handleReroll(mesId, currentPrompt) {
 
     const result = await callGenericPopup(popupHtml, POPUP_TYPE.CONFIRM, '', { okButton: 'Generate', cancelButton: 'Cancel' });
 
+    // 리스너 해제
     $(document).off('change', '.reroll_radio');
     $(document).off('input', '.reroll_textarea');
 
@@ -1273,30 +1361,27 @@ async function handleReroll(mesId, currentPrompt) {
                 const resultUrl = await SlashCommandParser.commands['sd'].callback({ quiet: 'true' }, finalPrompt.trim());
                 
                 if (typeof resultUrl === 'string' && !resultUrl.startsWith('Error')) {
-                    
-                    if (currentInsertType === INSERT_TYPE.REPLACE && targetItem.originalTag) {
-                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}" title="${escapeHtmlAttribute(finalPrompt.trim())}" alt="${escapeHtmlAttribute(finalPrompt.trim())}">`;
+                    if (targetItem.originalTag) {
+                        const idMatch = targetItem.originalTag.match(/data-autopic-id="([^"]*)"/);
+                        const idAttr = idMatch ? ` data-autopic-id="${idMatch[1]}"` : ` data-autopic-id="tag-${Date.now()}"`;
+                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(finalPrompt.trim())}" alt="${escapeHtmlAttribute(finalPrompt.trim())}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
-                    } 
-                    else {
+                    } else {
                         if (!message.extra) message.extra = {};
                         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
-
+                        
                         if (targetItem.swipeIdx !== undefined) {
                             message.extra.image_swipes[targetItem.swipeIdx] = resultUrl;
                         } else {
                             message.extra.image_swipes.push(resultUrl);
                         }
-
                         message.extra.image = resultUrl;
                         message.extra.title = finalPrompt.trim();
                         message.extra.inline_image = true;
                     }
 
                     updateMessageBlock(mesId, message);
-                    const $mesBlock = $(`.mes[mesid="${mesId}"]`);
-                    appendMediaToMessage(message, $mesBlock);
-                    
+                    appendMediaToMessage(message, $(`.mes[mesid="${mesId}"]`));
                     await context.saveChat();
                     
                     await eventSource.emit(event_types.MESSAGE_UPDATED, mesId);
@@ -1308,11 +1393,12 @@ async function handleReroll(mesId, currentPrompt) {
                 }
             } catch (e) { 
                 console.error(e);
-                toastr.error("생성 중 오류 발생."); 
+                toastr.error("이미지 생성 중 오류 발생."); 
             }
         }
     }
 }
+
 function applyTheme(theme) {
     const container = $('#autopic_settings_container');
     if (!container.length) return;
@@ -1380,7 +1466,8 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
                         message.extra.image_swipes.push(result);
                     } 
                     else if (insertType === INSERT_TYPE.REPLACE) {
-                        const newTag = `<img src="${escapeHtmlAttribute(result)}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
+                        const tagId = `tag-${Date.now()}-${i}`; 
+                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
                         updatedMes = updatedMes.replace(fullTag, () => newTag);
                     }
                 } else {
@@ -1413,4 +1500,73 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
             toastr.error("이미지 생성 과정에서 오류가 발생했습니다.");
         }
     }, 200);
+});
+
+async function attachTagControls(mesId) {
+    const context = getContext();
+    const message = context.chat[mesId];
+    if (!message || message.is_user) return;
+
+    const $mesBlock = $(`.mes[mesid="${mesId}"]`);
+    const $images = $mesBlock.find('.mes_text img[data-autopic-id]');
+
+    $images.each(function() {
+        const $img = $(this);
+        if ($img.parent().hasClass('autopic-tag-img-wrapper') || !$img.attr('src')) return;
+
+        const prompt = $img.attr('title') || "";
+        $img.wrap('<div class="autopic-tag-img-wrapper"></div>');
+        
+        const $controls = $(`
+            <div class="autopic-tag-controls">
+                <div class="autopic-control-btn reroll-trigger fa-solid fa-rotate interactable" 
+                     data-mesid="${mesId}" 
+                     data-prompt="${escapeHtmlAttribute(prompt)}" 
+                     title="Generate Another Image"
+                     role="button" 
+                     tabindex="0">
+                </div>
+            </div>
+        `);
+        $img.after($controls);
+    });
+}
+
+/**
+ * 모든 메시지를 검사하여 버튼이 누락된 곳에 부착
+ */
+const initializeAllTagControls = () => {
+    const context = getContext();
+    if (context && context.chat) {
+        const chatLength = context.chat.length;
+        const startIndex = Math.max(0, chatLength - 10);
+        
+        for (let i = startIndex; i < chatLength; i++) {
+            setTimeout(() => attachTagControls(i), (i - startIndex) * 10);
+        }
+    }
+};
+
+eventSource.on(event_types.CHAT_COMPLETED, () => {
+    initializeAllTagControls();
+});
+
+eventSource.on(event_types.CHARACTER_SELECTED, () => {
+    renderCharacterLinkUI();
+    renderCharacterPrompts();
+    initializeAllTagControls();
+});
+
+eventSource.on(event_types.CHAT_CHANGED, () => {
+    renderCharacterLinkUI();
+    renderCharacterPrompts();
+    initializeAllTagControls();
+});
+
+$(document).off('click', '.reroll-trigger').on('click', '.reroll-trigger', function(e) {
+    e.preventDefault(); 
+    e.stopPropagation();
+    const mesId = $(this).data('mesid');
+    const prompt = $(this).data('prompt');
+    handleReroll(mesId, prompt);
 });

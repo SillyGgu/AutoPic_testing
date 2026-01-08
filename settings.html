@@ -86,7 +86,12 @@
 					</button>
 				</div>
 				<div>
-					<label style="display:block; margin-bottom:10px; font-size:0.85rem; font-weight:bold; color: #4a90e2;">프롬프트 내용</label>
+					<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+					<label style="font-size:0.85rem; font-weight:bold; color: #4a90e2; margin:0;">프롬프트 내용</label>
+						<span id="prompt_edit_status" style="font-size:0.75rem; padding: 2px 8px; border-radius: 4px; background: var(--ap-bg-item); color: var(--ap-text-vague);">
+							전역 설정 편집 중
+						</span>
+					</div>
 					<textarea id="prompt_injection_text" class="gen-custom-input" rows="10" placeholder="AI에게 이미지 태그 생성을 지시하는 프롬프트를 입력하세요."></textarea>
 					<div id="character_prompts_section" style="margin-top: 25px; border-top: 1px dashed var(--ap-border); padding-top: 20px;">
 						<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
