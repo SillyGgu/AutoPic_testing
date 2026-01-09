@@ -894,24 +894,31 @@ $(function () {
                     }
 
                     .mes_img_swipes {
+                        opacity: 0 !important;   
+                        pointer-events: none !important;
+                        z-index: 1000 !important;
+                        background: none !important;  
+                        border-radius: 0 !important; 
+                        padding: 0 !important;        
+                        transition: opacity 0.15s ease-in-out !important;
+                    }
+
+                    .mes_media_container.ui-active .mes_img_swipes,
+                    .mes_media_container.ui-active .mes_img_controls {
                         opacity: 1 !important;
                         pointer-events: auto !important;
-                        z-index: 1000 !important;
-                        background: rgba(0,0,0,0.3) !important;
-                        border-radius: 20px !important;
-                        padding: 0 10px !important;
                     }
 
                     .mes_img_swipe_left, .mes_img_swipe_right {
-                        opacity: 0.2 !important; /* 기본적으로 흐리게 보임 */
+                        opacity: 0.2 !important;
                         transition: opacity 0.2s !important;
                     }
 
-                    /* UI가 활성화되면 화살표를 진하게 표시 */
                     .mes_media_container.ui-active .mes_img_swipe_left,
                     .mes_media_container.ui-active .mes_img_swipe_right {
                         opacity: 1 !important;
                     }
+                }
                 }
                 @media (min-width: 1000px) {
                     .mobile-ui-toggle { display: none; }
@@ -923,37 +930,49 @@ $(function () {
 				/* ===============================
 				   5. 태그 치환 모드 이미지 스타일 (Autopic 전용 클래스 적용)
 				================================ */
-				.mes_text img[data-autopic-id] {
+				.mes_text img[data-autopic-id],
+				.autopic-tag-img-wrapper img,
+				.mes_text img[title*="Character"],
+				.mes_text img[title*="indoors"] {
 					border-radius: 12px !important;
-					margin: 10px 0 !important;
+					margin: 10px auto !important;
 					display: block !important;
 					max-width: 100% !important;
 					height: auto !important;
 					box-shadow: 0 4px 15px rgba(0,0,0,0.3) !important;
 					border: 1px solid var(--ap-border, #333336) !important;
-					transition: transform 0.2s ease;
+					transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease !important;
+					cursor: pointer;
+					position: relative;
+					z-index: 1;
 				}
 
-				.mes_text img[data-autopic-id]:hover {
-					transform: scale(1.01);
+				/* 2. Hover 상태: 마우스를 올렸을 때 살짝 확대 및 그림자 강조 */
+				.mes_text img[data-autopic-id]:hover,
+				.autopic-tag-img-wrapper img:hover,
+				.mes_text img[title*="Character"]:hover,
+				.mes_text img[title*="indoors"]:hover {
+					transform: scale(1.01) !important; 
+					box-shadow: 0 8px 25px rgba(0,0,0,0.5) !important;
+					z-index: 5 !important; 
 				}
 
 				.autopic-tag-img-wrapper {
 					position: relative;
-					display: block; /* inline-block에서 변경하여 정렬 유지 */
+					display: block;
 					max-width: fit-content;
-					margin: 10px 0;
+					margin: 12px auto !important;
+					overflow: visible !important; 
 				}
 
-				/* 갤러리 컨트롤 스타일과 통일 */
 				.autopic-tag-controls {
 					position: absolute;
-					top: 5px;
-					right: 10px;
+					top: 10px;
+					right: 12px;
 					display: flex;
 					gap: 6px;
 					opacity: 0;
-					transition: opacity 0.15s ease-in-out;
+					transition: opacity 0.2s ease;
 					z-index: 10;
 					pointer-events: none;
 				}
@@ -965,32 +984,35 @@ $(function () {
 				}
 
 				.autopic-control-btn {
-					background: none !important; /* 배경 제거 */
-					width: 28px !important;
-					height: 28px !important;
+					background: rgba(0, 0, 0, 0.5) !important;
+					backdrop-filter: blur(4px);
+					border-radius: 8px !important;
+					width: 34px !important;
+					height: 34px !important;
 					display: flex !important;
 					align-items: center !important;
 					justify-content: center !important;
-					color: rgba(255, 255, 255, 0.95) !important;
-					font-size: 15px !important;
-					text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; /* 가독성을 위한 그림자 */
+					color: white !important;
+					font-size: 16px !important;
+					text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important;
 					cursor: pointer;
-					border: none !important;
+					border: 1px solid rgba(255,255,255,0.2) !important;
 					padding: 0 !important;
 				}
 
 				.autopic-control-btn:hover {
 					color: var(--ap-accent, #4a90e2) !important;
-					transform: scale(1.1);
+					background: rgba(0, 0, 0, 0.8) !important;
+					transform: scale(1.1) !important;
 				}
 
-				/* 모바일 대응: 본문 이미지도 클릭 시 UI 토글 */
 				@media (max-width: 1000px) {
-					.autopic-tag-controls {
-						opacity: 0.8;
-						background: rgba(0,0,0,0.3);
-						border-radius: 8px;
-						padding: 2px;
+					.autopic-tag-controls { opacity: 0 !important; }
+					.autopic-tag-img-wrapper.ui-active .autopic-tag-controls { opacity: 1 !important; }
+				}
+					.autopic-tag-img-wrapper.ui-active .autopic-tag-controls {
+						opacity: 1 !important;
+						pointer-events: auto !important;
 					}
 				}
             </style>
@@ -1059,20 +1081,20 @@ $(function () {
          * ------------------------------------------------------- */
         document.addEventListener('click', function (e) {
             const target = e.target;
-            const $mediaContainer = $(target).closest('.mes_media_container');
+            const $mediaContainer = $(target).closest('.mes_media_container, .autopic-tag-img-wrapper');
             
             if ($mediaContainer.length === 0) {
-                $('.mes_media_container.ui-active').removeClass('ui-active');
+                $('.mes_media_container.ui-active, .autopic-tag-img-wrapper.ui-active').removeClass('ui-active');
                 return;
             }
 
-            const isButton = $(target).closest('.right_menu_button, .mes_img_controls, .mes_img_swipes, .mobile-ui-toggle').length > 0;
+            const isButton = $(target).closest('.right_menu_button, .mes_img_controls, .mes_img_swipes, .mobile-ui-toggle, .autopic-control-btn, .autopic-tag-controls, .reroll-trigger').length > 0;
 
             if (window.innerWidth < 1000 && !$mediaContainer.hasClass('ui-active')) {
                 if (!isButton) {
                     e.stopImmediatePropagation();
                     e.preventDefault();
-                    $('.mes_media_container.ui-active').removeClass('ui-active');
+                    $('.mes_media_container.ui-active, .autopic-tag-img-wrapper.ui-active').removeClass('ui-active');
                     $mediaContainer.addClass('ui-active');
                 }
                 return;
@@ -1111,7 +1133,16 @@ $(function () {
             const prompt = $(this).data('prompt');
             handleReroll(mesId, prompt);
         });
-
+        $(document).on('click', '.swipe_left, .swipe_right', function () {
+            const $message = $(this).closest('.mes');
+            const mesId = $message.attr('mesid');
+            
+            if (mesId !== undefined) {
+                setTimeout(() => {
+                    attachTagControls(mesId);
+                }, 150);
+            }
+        });
 
     })();
 });
@@ -1501,30 +1532,45 @@ async function attachTagControls(mesId) {
     if (!message || message.is_user) return;
 
     const $mesBlock = $(`.mes[mesid="${mesId}"]`);
-    const $images = $mesBlock.find('.mes_text img[data-autopic-id]');
+    const $images = $mesBlock.find('.mes_text img');
 
     $images.each(function() {
         const $img = $(this);
-        if ($img.parent().hasClass('autopic-tag-img-wrapper') || !$img.attr('src')) return;
-
-        const prompt = $img.attr('title') || "";
-        $img.wrap('<div class="autopic-tag-img-wrapper"></div>');
         
-        const $controls = $(`
-            <div class="autopic-tag-controls">
-                <div class="autopic-control-btn reroll-trigger fa-solid fa-rotate interactable" 
-                     data-mesid="${mesId}" 
-                     data-prompt="${escapeHtmlAttribute(prompt)}" 
-                     title="Generate Another Image"
-                     role="button" 
-                     tabindex="0">
+        if ($img.parent().hasClass('autopic-tag-img-wrapper')) return;
+        
+        const src = $img.attr('src') || "";
+        const title = $img.attr('title') || "";
+        const hasAutopicId = $img.attr('data-autopic-id');
+
+        const isAutopicImg = hasAutopicId || 
+                             title.includes('Character') || 
+                             title.includes('indoors') || 
+                             title.includes('outdoors') ||
+                             (title.split(',').length > 3); 
+
+        if (isAutopicImg && src) {
+            if (!hasAutopicId) {
+                $img.attr('data-autopic-id', `tag-recovered-${Date.now()}`);
+            }
+
+            $img.wrap('<div class="autopic-tag-img-wrapper"></div>');
+            
+            const $controls = $(`
+                <div class="autopic-tag-controls">
+                    <div class="autopic-control-btn reroll-trigger fa-solid fa-rotate interactable" 
+                         data-mesid="${mesId}" 
+                         data-prompt="${escapeHtmlAttribute(title)}" 
+                         title="Generate Another Image"
+                         role="button" 
+                         tabindex="0">
+                    </div>
                 </div>
-            </div>
-        `);
-        $img.after($controls);
+            `);
+            $img.after($controls);
+        }
     });
 }
-
 /**
  * 모든 메시지를 검사하여 버튼이 누락된 곳에 부착
  */
