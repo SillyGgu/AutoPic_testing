@@ -9,6 +9,7 @@
             <div class="image-gen-nav-item active" data-tab="tab-gen-general">⚙️ 기본 설정</div>
             <div class="image-gen-nav-item" data-tab="tab-gen-templates">🎨 프롬프트 템플릿</div>
             <div class="image-gen-nav-item" data-tab="tab-gen-linking">🔗 캐릭터 연동</div>
+            <div class="image-gen-nav-item" data-tab="tab-gen-illustration">🖼️ 삽화 생성</div>
         </div>
         
         <div id="tab-gen-general" class="image-gen-tab-content active">
@@ -154,7 +155,51 @@
 				</div>
 			</div>
 		</div>
+        <div id="tab-gen-illustration" class="image-gen-tab-content">
+            <div class="image-gen-card">
+                <h3 class="gen-section-title">🚀 삽화 생성 엔진 설정</h3>
+                <p style="font-size: 0.82rem; color: var(--ap-text-vague); margin-bottom: 15px;">
+                    SillyTavern에 연결된 API를 사용합니다. 외부 API 키를 따로 입력할 필요가 없습니다.
+                </p>
+                
+				<div class="margin-bottom-15">
+					<label style="display:block; margin-bottom:5px; font-size:0.85rem; font-weight:bold;">API 소스</label>
+					<select id="illu_api_source" class="gen-custom-input"> <!-- id 확인 -->
+						<option value="main">SillyTavern 메인 API</option>
+						<option value="profile">Connection Profile</option>
+					</select>
+				</div>
 
+				<div id="illu_profile_container" class="margin-bottom-15" style="display:none;">
+					<label style="display:block; margin-bottom:5px; font-size:0.85rem; font-weight:bold;">사용할 프로필</label>
+					<select id="illu_st_profile" class="gen-custom-input"></select> <!-- id 확인 -->
+				</div>
+
+                <div class="flex-container flexnowrap" style="align-items: center; gap: 20px;">
+                    <label style="flex-shrink: 0; min-width: 120px; font-weight:bold;">생성할 삽화 개수</label>
+                    <input id="illu_count" class="gen-custom-input" type="number" min="1" max="5" style="width: 80px;">
+                </div>
+            </div>
+
+            <div class="image-gen-card">
+                <h3 class="gen-section-title">📝 삽화 생성 지시문 (AI 가이드라인)</h3>
+                <textarea id="illu_system_prompt" class="gen-custom-input" rows="6"></textarea>
+                
+                <!-- [추가된 부분: Prefill 입력란] -->
+                <div style="margin-top: 15px;">
+                    <label style="display:block; margin-bottom:5px; font-size:0.85rem; font-weight:bold; color: #cccccc;">프롬프트 선행 입력 (Prefill)</label>
+                    <input id="illu_prefill" class="gen-custom-input" type="text" placeholder="예: <pic" value="<pic">
+                    <p style="font-size: 0.75rem; color: var(--ap-text-vague); margin-top: 5px; line-height: 1.4;">
+                        AI의 응답 시작 부분을 강제로 지정합니다. 태그 생성을 유도하기 위해 <code>&lt;pic</code> 등을 입력해두면 정확도가 높아집니다.
+                    </p>
+                </div>
+                <!-- [추가 종료] -->
+
+                <p style="font-size: 0.75rem; color: var(--ap-text-vague); margin-top: 10px;">
+                    AI가 메시지 내용을 읽고 적절한 &lt;pic prompt="..."&gt; 태그를 생성하도록 유도합니다.
+                </p>
+            </div>
+		
     </div>
 </div>
 
@@ -331,5 +376,16 @@
 @media screen and (max-width: 500px) {
     #autopic_settings_container .flex-container.flexnowrap { flex-wrap: wrap !important; gap: 8px !important; }
     #autopic_settings_container .gen-custom-input { width: 100%; } /* !important 제거하여 수동 리사이징 우선권 부여 */
+}
+.autopic-gen-btn {
+    color: var(--ap-accent, #4a90e2); /* AutoPic의 포인트 컬러 사용 */
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.autopic-gen-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
 }
 </style>
