@@ -376,7 +376,6 @@ async function createSettings(settingsHtml) {
         saveSettingsDebounced();
     });
     
-    // [추가됨] Prefill 설정 저장 리스너
     $('#illu_prefill').on('input', function() {
         extension_settings[extensionName].illustration.prefill = $(this).val();
         saveSettingsDebounced();
@@ -426,7 +425,6 @@ function renderCharacterLinkUI() {
         statusHtml += `<strong>연동 상태:</strong> <span style="color: var(--color-text-vague);">없음 (전역 설정 사용 중)</span>`;
         $('#gen-remove-char-link-btn').hide();
         
-        // 상태 표시줄 업데이트
         $statusBadge.text('전역 설정 편집 중').css('color', 'var(--ap-text-vague)');
         
         if (!$('#prompt_injection_text').is(':focus')) {
@@ -724,12 +722,9 @@ function refreshSTProfileList() {
 
     const savedId = extension_settings[extensionName].illustration.profileId;
     
-    // [핵심 수정] getContext()를 통해 최신 extension_settings 상태를 안전하게 참조
     const context = getContext();
-    // context.extension_settings가 있으면 사용하고, 없으면 전역 변수 fallback
     const globalSettings = context.extension_settings || extension_settings;
     
-    // connectionManager 설정이 존재하는지 확인하고 profiles 배열 가져오기
     const cmSettings = globalSettings.connectionManager;
     const profiles = (cmSettings && Array.isArray(cmSettings.profiles)) ? cmSettings.profiles : [];
     
@@ -741,13 +736,11 @@ function refreshSTProfileList() {
     } else {
         profiles.forEach(p => {
             const selected = p.id === savedId ? 'selected' : '';
-            // 이름이 없는 경우 ID로 표시
             const pName = p.name || `Profile ${p.id}`;
             $select.append(`<option value="${p.id}" ${selected}>${pName}</option>`);
         });
     }
 
-    // 저장된 ID가 현재 목록에 있다면 값 설정 (UI 동기화)
     if (savedId && profiles.some(p => p.id === savedId)) {
         $select.val(savedId);
     }
@@ -772,8 +765,6 @@ function addAutopicIllustrationButton($mesBlock) {
                 ""
             );
 
-            // [수정됨] 취소(Cancel)는 false 또는 null을 반환하므로 이때는 함수 종료
-            // 빈 문자열("")은 확인(OK)을 누른 것이므로 통과
             if (instruction === false || instruction === null || instruction === undefined) {
                 return; 
             }
@@ -793,7 +784,6 @@ async function executeManualIllustration(mesId, userNote) {
     const count = parseInt(settings.count) || 1;
     const prefill = settings.prefill || "";
 
-    // 프롬프트 구성
     const finalPrompt = `### Instructions:
 ${settings.systemPrompt}
 
@@ -812,10 +802,7 @@ ${userNote ? `2. User Special Request: ${userNote}` : ''}
         let aiResponse = "";
         let promptToSend = finalPrompt;
 
-        // [중요 수정] window.ConnectionManagerRequestService 호출 제거
-        // 'profile' 소스 선택 시에도 generateRaw(SillyTavern 메인 API)를 사용하여 오류를 방지하고 안정적인 생성을 보장함.
         if (settings.source === 'profile') {
-            // 추후 필요 시 선택된 프로필의 설정을 로드하여 generateRaw에 적용하는 로직 추가 가능
             console.log(`[AutoPic] Profile 모드 선택됨: 현재 활성화된 API 설정을 사용하여 생성합니다.`);
         }
 
@@ -823,7 +810,6 @@ ${userNote ? `2. User Special Request: ${userNote}` : ''}
             promptToSend += `\n\n${prefill}`; 
         }
         
-        // SillyTavern 표준 생성 함수 사용
         aiResponse = await generateRaw({
             prompt: promptToSend,
             quiet: true,
@@ -832,7 +818,6 @@ ${userNote ? `2. User Special Request: ${userNote}` : ''}
             maxContext: 0 
         });
         
-        // Prefill 처리 보정
         if (prefill && aiResponse && !aiResponse.includes(prefill) && !aiResponse.includes('<pic')) {
              aiResponse = prefill + aiResponse;
         }
@@ -865,7 +850,6 @@ ${userNote ? `2. User Special Request: ${userNote}` : ''}
 async function processAutoPic(mesId) {
     const context = getContext();
     const message = context.chat[mesId];
-    // 메시지가 없거나 유저 메시지면 중단
     if (!message || message.is_user) return;
 
     let regex;
@@ -888,7 +872,6 @@ async function processAutoPic(mesId) {
         if (!message.extra) message.extra = {};
         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
         
-        // 정확히 해당 mesId를 가진 메시지 블록을 타겟팅
         const messageElement = $(`.mes[mesid="${mesId}"]`);
         let hasChanged = false;
         let lastImageResult = null;
@@ -901,7 +884,6 @@ async function processAutoPic(mesId) {
             const prompt = match[1] || '';
             if (!prompt.trim()) continue;
 
-            // SD API 호출
             const result = await SlashCommandParser.commands['sd'].callback({ quiet: 'true' }, prompt.trim());
             
             if (typeof result === 'string' && result.trim().length > 0 && !result.startsWith('Error')) {
@@ -910,12 +892,10 @@ async function processAutoPic(mesId) {
                 lastPromptUsed = prompt.trim();
                 
                 if (insertType === INSERT_TYPE.REPLACE) {
-                    // 태그 치환 모드: <pic>을 <img>로 교체
                     const tagId = `tag-${Date.now()}-${i}`; 
                     const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
                     updatedMes = updatedMes.replace(fullTag, () => newTag);
                 } else {
-                    // 인라인/새 메시지 모드: 갤러리에 추가
                     message.extra.image_swipes.push(result);
                 }
             }
@@ -928,15 +908,12 @@ async function processAutoPic(mesId) {
             } else {
                 message.extra.image = lastImageResult; 
                 message.extra.inline_image = true;
-                // 미디어 요소를 해당 메시지 블록에 부착
                 appendMediaToMessage(message, messageElement);
             }
             
-            // 변경사항 확정 및 저장
             updateMessageBlock(mesId, message);
             await context.saveChat();
             
-            // 렌더링 이벤트 발생시켜 UI 갱신
             await eventSource.emit(event_types.MESSAGE_UPDATED, mesId);
             await eventSource.emit(event_types.MESSAGE_RENDERED, mesId);
             toastr.success(`이미지 생성 완료! (메시지 #${mesId})`);
@@ -956,7 +933,6 @@ eventSource.on(
                 return;
             }
 
-            // [수정] 함수 호출 대신 설정값 직접 사용
             const prompt = extension_settings[extensionName].promptInjection.prompt;
             
             const depth = extension_settings[extensionName].promptInjection.depth || 0;
@@ -1305,7 +1281,6 @@ $(function () {
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
             
-            // 수동 삽화 버튼 및 태그 컨트롤 부착
             const $mesBlock = $(`.mes[mesid="${mesId}"]`);
             addAutopicIllustrationButton($mesBlock); 
             setTimeout(() => attachTagControls(mesId), 150);
@@ -1327,7 +1302,6 @@ $(function () {
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
             
-            // 수동 삽화 버튼 및 태그 컨트롤 부착
             const $mesBlock = $(`.mes[mesid="${mesId}"]`);
             addAutopicIllustrationButton($mesBlock); 
             setTimeout(() => attachTagControls(mesId), 150);
@@ -1665,14 +1639,12 @@ async function handleReroll(mesId, currentPrompt) {
                 if (typeof resultUrl === 'string' && !resultUrl.startsWith('Error')) {
                     const currentInsertType = extension_settings[extensionName].insertType;
 
-                    // [핵심 수정] 태그 치환 모드일 때만 본문(message.mes)을 수정함
                     if (currentInsertType === INSERT_TYPE.REPLACE && targetItem.originalTag) {
                         const idMatch = targetItem.originalTag.match(/data-autopic-id="([^"]*)"/);
                         const idAttr = idMatch ? ` data-autopic-id="${idMatch[1]}"` : ` data-autopic-id="tag-${Date.now()}"`;
                         const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(finalPrompt.trim())}" alt="${escapeHtmlAttribute(finalPrompt.trim())}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
                     } 
-                    // [핵심 수정] 그 외(INLINE 등) 모드에서는 본문은 절대 건드리지 않고 갤러리(extra)만 수정
                     else {
                         if (!message.extra) message.extra = {};
                         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
@@ -1805,14 +1777,12 @@ $(document).off('click', '.reroll-trigger').on('click', '.reroll-trigger', funct
 });
 
 $(document).ready(() => {
-    // 기존 메시지들에 버튼 부착
     $("#chat .mes").each(function () {
         addAutopicIllustrationButton($(this));
     });
 
     initializeAllTagControls();
 
-    // 새 메시지 실시간 감시
     const chatBody = document.getElementById('chat');
     if (chatBody) {
         const chatObserver = new MutationObserver((mutations) => {
