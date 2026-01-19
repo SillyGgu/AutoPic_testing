@@ -784,8 +784,29 @@ async function executeManualIllustration(mesId, userNote) {
     const count = parseInt(settings.count) || 1;
     const prefill = settings.prefill || "";
 
+    let systemPromptToUse = settings.systemPrompt;
+
+    const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
+    if (charId !== undefined && charId !== -1 && characters[charId]) {
+        const avatarFile = characters[charId].avatar;
+        const charPrompts = extension_settings[extensionName].characterPrompts?.[avatarFile] || [];
+
+        for (let i = 0; i < 6; i++) {
+            const placeholder = `{autopic_char${i + 1}}`;
+            let replacement = "";
+            if (charPrompts[i] && charPrompts[i].enabled !== false) {
+                replacement = charPrompts[i].prompt || "";
+            }
+            systemPromptToUse = systemPromptToUse.split(placeholder).join(replacement);
+        }
+    } else {
+        for (let i = 1; i <= 6; i++) {
+            systemPromptToUse = systemPromptToUse.split(`{autopic_char${i}}`).join("");
+        }
+    }
+
     const finalPrompt = `### Instructions:
-${settings.systemPrompt}
+${systemPromptToUse}
 
 ### Target Message Content to Analyze:
 "${chatMsg.mes}"
@@ -837,8 +858,9 @@ ${userNote ? `2. User Special Request: ${userNote}` : ''}
         
         chatMsg.mes += "\n" + selectedTags;
         updateMessageBlock(mesId, chatMsg);
-		
-        await context.saveChat(); 
+        
+        await context.saveChat();
+        
         await processAutoPic(mesId);
 
     } catch (err) {
@@ -852,6 +874,9 @@ async function processAutoPic(mesId) {
     const message = context.chat[mesId];
     if (!message || message.is_user) return;
 
+    const insertType = extension_settings[extensionName].insertType;
+    if (insertType === INSERT_TYPE.DISABLED) return;
+
     let regex;
     try {
         let rawRegex = regexFromString(extension_settings[extensionName].promptInjection.regex);
@@ -864,7 +889,6 @@ async function processAutoPic(mesId) {
     if (matches.length === 0) return;
 
     try {
-        const insertType = extension_settings[extensionName].insertType;
         const total = matches.length;
         
         toastr.info(`${total}개의 이미지 생성을 시작합니다...`, "AutoPic");
@@ -872,7 +896,6 @@ async function processAutoPic(mesId) {
         if (!message.extra) message.extra = {};
         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
         
-        const messageElement = $(`.mes[mesid="${mesId}"]`);
         let hasChanged = false;
         let lastImageResult = null;
         let lastPromptUsed = "";
@@ -895,7 +918,7 @@ async function processAutoPic(mesId) {
                     const tagId = `tag-${Date.now()}-${i}`; 
                     const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
                     updatedMes = updatedMes.replace(fullTag, () => newTag);
-                } else {
+                } else if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.NEW_MESSAGE) {
                     message.extra.image_swipes.push(result);
                 }
             }
@@ -903,9 +926,11 @@ async function processAutoPic(mesId) {
 
         if (hasChanged) {
             message.extra.title = lastPromptUsed;
+            const messageElement = $(`.mes[mesid="${mesId}"]`);
+
             if (insertType === INSERT_TYPE.REPLACE) {
                 message.mes = updatedMes;
-            } else {
+            } else if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.NEW_MESSAGE) {
                 message.extra.image = lastImageResult; 
                 message.extra.inline_image = true;
                 appendMediaToMessage(message, messageElement);
@@ -933,12 +958,36 @@ eventSource.on(
                 return;
             }
 
-            const prompt = extension_settings[extensionName].promptInjection.prompt;
-            
+            let prompt = extension_settings[extensionName].promptInjection.prompt;
+            if (!prompt) return;
+
+            const context = getContext();
+            const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
+
+            if (charId !== undefined && charId !== -1 && characters[charId]) {
+                const avatarFile = characters[charId].avatar;
+                const charPrompts = extension_settings[extensionName].characterPrompts?.[avatarFile] || [];
+
+                for (let i = 0; i < 6; i++) {
+                    const placeholder = `{autopic_char${i + 1}}`;
+                    let replacement = "";
+
+                    if (charPrompts[i] && charPrompts[i].enabled !== false) {
+                        replacement = charPrompts[i].prompt || "";
+                    }
+
+                    prompt = prompt.split(placeholder).join(replacement);
+                }
+            } else {
+                for (let i = 1; i <= 6; i++) {
+                    prompt = prompt.split(`{autopic_char${i}}`).join("");
+                }
+            }
+
             const depth = extension_settings[extensionName].promptInjection.depth || 0;
             const role = extension_settings[extensionName].promptInjection.position.replace('deep_', '') || 'system';
 
-            if (prompt) {
+            if (prompt.trim()) {
                 if (depth === 0) {
                     eventData.chat.push({ role: role, content: prompt });
                 } else {
