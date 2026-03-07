@@ -5,18 +5,59 @@ import {
     event_types,
     updateMessageBlock,
     characters,
-    generateQuietPrompt,
-    generateRaw,
-    appendMediaToMessage
 } from '../../../../script.js';
-
+import { appendMediaToMessage } from '../../../../script.js';
 import { regexFromString } from '../../../utils.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 
+
 const extensionName = 'AutoPic_testing';
 const extensionFolderPath = `/scripts/extensions/third-party/${extensionName}`;
 
+// ── NAI fetch 인터셉터 ────────────────────────────────────────
+// ST의 /api/novelai/generate-image 요청을 가로채서
+// AutoPic 프록시(/api/plugins/autopic/generate-image)로 리다이렉트한다.
+// 프록시는 cfg_rescale을 포함해 NAI API에 전달한다.
+(function installNaiFetchInterceptor() {
+    const _fetch = window.fetch.bind(window);
+    window.fetch = async function (input, init, ...rest) {
+        const url = typeof input === 'string' ? input
+            : (input instanceof Request ? input.url : String(input));
+
+        if (url.includes('/api/novelai/generate-image') && init?.body && getNaiParams()?.useNaiRescale) {
+            try {
+                const body = JSON.parse(init.body);
+                const cfg  = getNaiParams()?.cfg_rescale ?? 0;
+
+                // cfg_rescale 주입 후 AutoPic 프록시로 리다이렉트
+                body.cfg_rescale = cfg;
+                console.log('[AutoPic Interceptor] cfg_rescale 주입:', cfg, '→ 프록시로 리다이렉트');
+
+                const newInit = { ...init, body: JSON.stringify(body) };
+                return _fetch('/api/plugins/autopic/generate-image', newInit, ...rest);
+            } catch (e) {
+                console.warn('[AutoPic Interceptor] 파싱 실패, 원본 요청 통과:', e);
+            }
+        }
+
+        return _fetch(input, init, ...rest);
+    };
+})();
+// ─────────────────────────────────────────────────────────────
+
+// ── NAI cfg_rescale 파라미터 ──────────────────────────────────
+const NAI_DEFAULTS = { cfg_rescale: 0.0, useNaiRescale: false };
+
+function getNaiParams() {
+    const s = extension_settings[extensionName];
+    if (!s.naiParams) s.naiParams = { ...NAI_DEFAULTS };
+    for (const [k, v] of Object.entries(NAI_DEFAULTS)) {
+        if (s.naiParams[k] === undefined) s.naiParams[k] = v;
+    }
+    return s.naiParams;
+}
+// ─────────────────────────────────────────────────────────────
 
 const INSERT_TYPE = {
     DISABLED: 'disabled',
@@ -55,15 +96,8 @@ const defaultAutoPicSettings = {
     },
     linkedPresets: {},
     characterPrompts: {},
-    illustration: {
-        source: 'main', 
-        profileId: '',
-        systemPrompt: '<image_generation>\nYou must insert a <pic prompt="example prompt"> at end of the reply. Prompts are used for stable diffusion image generation, based on the plot and character to output appropriate prompts to generate captivating images.\n</image_generation>',
-        prefill: '<pic',
-        count: 1,
-    }
+    naiParams: { ...NAI_DEFAULTS },
 };
-
 function updateUI() {
     $('#autopic_menu_item').toggleClass(
         'selected',
@@ -77,6 +111,8 @@ function updateUI() {
         if (!$('#prompt_injection_text').is(':focus')) {
             updatePresetSelect();
             renderCharacterLinkUI();
+
+            
             $('#prompt_injection_text').val(extension_settings[extensionName].promptInjection.prompt);
         }
 
@@ -86,20 +122,14 @@ function updateUI() {
         $('#prompt_injection_position').val(extension_settings[extensionName].promptInjection.position);
         $('#prompt_injection_depth').val(extension_settings[extensionName].promptInjection.depth);
         
-        // 삽화 UI 업데이트 부분
-        const illu = extension_settings[extensionName].illustration;
-        $('#illu_api_source').val(illu.source);
-        $('#illu_count').val(illu.count);
-        $('#illu_system_prompt').val(illu.systemPrompt);
-        $('#illu_prefill').val(illu.prefill !== undefined ? illu.prefill : '<pic'); 
-        
-        if (illu.source === 'profile') {
-            $('#illu_profile_container').show();
-            refreshSTProfileList();
-        } else {
-            $('#illu_profile_container').hide();
-        }
-        
+        // NAI cfg_rescale UI 업데이트
+        const nai = getNaiParams();
+        $('#nai_use_rescale').prop('checked', !!nai.useNaiRescale);
+        $('#nai_cfg_rescale').val(nai.cfg_rescale).prop('disabled', !nai.useNaiRescale);
+        $('#nai_cfg_rescale_display').text(Number(nai.cfg_rescale).toFixed(2));
+        // NAI Rescale 비활성화 시 카드 흐리게
+        $('#nai-params-card').css('opacity', nai.useNaiRescale && extension_settings?.sd?.source === 'novel' ? '1' : '0.5');
+
         $('.theme-dot').removeClass('active');
         $(`.theme-dot[data-theme="${currentTheme}"]`).addClass('active');
     }
@@ -133,14 +163,22 @@ async function loadSettings() {
         if (!extension_settings[extensionName].linkedPresets) {
             extension_settings[extensionName].linkedPresets = {};
         }
-        // 삽화 생성 설정 초기화 체크 추가
-        if (!extension_settings[extensionName].illustration) {
-            extension_settings[extensionName].illustration = { ...defaultAutoPicSettings.illustration };
+        // naiParams 초기화
+        if (!extension_settings[extensionName].naiParams) {
+            extension_settings[extensionName].naiParams = { ...NAI_DEFAULTS };
+        } else {
+            for (const [k, v] of Object.entries(NAI_DEFAULTS)) {
+                if (extension_settings[extensionName].naiParams[k] === undefined)
+                    extension_settings[extensionName].naiParams[k] = v;
+            }
+            // 구버전 호환: useNaiRescale이 없던 시절 저장된 경우 기본 false
+            if (extension_settings[extensionName].naiParams.useNaiRescale === undefined) {
+                extension_settings[extensionName].naiParams.useNaiRescale = false;
+            }
         }
     }
     updateUI();
 }
-
 
 
 async function createSettings(settingsHtml) {
@@ -162,12 +200,6 @@ async function createSettings(settingsHtml) {
         
         if (targetTabId === 'tab-gen-linking') renderCharacterLinkUI();
         if (targetTabId === 'tab-gen-templates') renderCharacterPrompts();
-        
-        if (targetTabId === 'tab-gen-illustration') {
-            if (extension_settings[extensionName].illustration.source === 'profile') {
-                refreshSTProfileList();
-            }
-        }
     });
 
 
@@ -358,29 +390,26 @@ async function createSettings(settingsHtml) {
         extension_settings[extensionName].promptInjection.depth = isNaN(value) ? 0 : value;
         saveSettingsDebounced();
     });
-    $('#illu_api_source').on('change', function() {
-        extension_settings[extensionName].illustration.source = $(this).val();
+
+    // ── NAI cfg_rescale 바인딩 ────────────────────────────────
+    $('#nai_use_rescale').on('change', function() {
+        const enabled = $(this).prop('checked');
+        getNaiParams().useNaiRescale = enabled;
+        $('#nai_cfg_rescale').prop('disabled', !enabled);
         updateUI();
         saveSettingsDebounced();
+        if (enabled) {
+            toastr.info('NAI Rescale 활성화: AutoPic 서버 플러그인이 필요합니다.');
+        }
     });
-    $('#illu_st_profile').on('change', function() {
-        extension_settings[extensionName].illustration.profileId = $(this).val();
+    $('#nai_cfg_rescale').on('input', function() {
+        const val = parseFloat($(this).val());
+        getNaiParams().cfg_rescale = isNaN(val) ? 0 : val;
+        $('#nai_cfg_rescale_display').text(getNaiParams().cfg_rescale.toFixed(2));
         saveSettingsDebounced();
     });
-    $('#illu_count').on('input', function() {
-        extension_settings[extensionName].illustration.count = parseInt($(this).val()) || 1;
-        saveSettingsDebounced();
-    });
-    $('#illu_system_prompt').on('input', function() {
-        extension_settings[extensionName].illustration.systemPrompt = $(this).val();
-        saveSettingsDebounced();
-    });
-    
-    $('#illu_prefill').on('input', function() {
-        extension_settings[extensionName].illustration.prefill = $(this).val();
-        saveSettingsDebounced();
-    });
-	
+    // ─────────────────────────────────────────────────────────
+
     updateUI();
 }
 
@@ -425,6 +454,7 @@ function renderCharacterLinkUI() {
         statusHtml += `<strong>연동 상태:</strong> <span style="color: var(--color-text-vague);">없음 (전역 설정 사용 중)</span>`;
         $('#gen-remove-char-link-btn').hide();
         
+        // 상태 표시줄 업데이트
         $statusBadge.text('전역 설정 편집 중').css('color', 'var(--ap-text-vague)');
         
         if (!$('#prompt_injection_text').is(':focus')) {
@@ -716,238 +746,40 @@ function updatePresetSelect(forceSelectedName = null) {
     }
 }
 
-function refreshSTProfileList() {
-    const $select = $('#illu_st_profile');
-    if (!$select.length) return;
-
-    const savedId = extension_settings[extensionName].illustration.profileId;
-    
+function getFinalPrompt() {
     const context = getContext();
-    const globalSettings = context.extension_settings || extension_settings;
-    
-    const cmSettings = globalSettings.connectionManager;
-    const profiles = (cmSettings && Array.isArray(cmSettings.profiles)) ? cmSettings.profiles : [];
-    
-    $select.empty();
-    $select.append('<option value="">-- 프로필 선택 --</option>');
-
-    if (profiles.length === 0) {
-        $select.append('<option value="" disabled>프로필을 찾을 수 없습니다 (Connection Manager 확인)</option>');
-    } else {
-        profiles.forEach(p => {
-            const selected = p.id === savedId ? 'selected' : '';
-            const pName = p.name || `Profile ${p.id}`;
-            $select.append(`<option value="${p.id}" ${selected}>${pName}</option>`);
-        });
-    }
-
-    if (savedId && profiles.some(p => p.id === savedId)) {
-        $select.val(savedId);
-    }
-}
-function addAutopicIllustrationButton($mesBlock) {
-    if (!$mesBlock.length || $mesBlock.hasClass('user_mes') || $mesBlock.find('.ap-manual-gen-btn').length) return;
-
-    const mesId = $mesBlock.attr('mesid');
-    if (mesId === undefined) return;
-
-    const $btn = $('<div>')
-        .addClass('mes_button ap-manual-gen-btn fa-solid fa-wand-magic-sparkles interactable')
-        .attr('title', '이 메시지로 삽화 프롬프트 생성')
-        .css({ 'opacity': '0.8', 'margin-left': '5px', 'color': 'var(--ap-accent)' })
-        .on('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            const instruction = await callGenericPopup(
-                "어떤 장면을 삽화로 만들까요?\n(내용을 비우고 확인을 누르면 AI가 알아서 판단합니다)", 
-                POPUP_TYPE.INPUT, 
-                ""
-            );
-
-            if (instruction === false || instruction === null || instruction === undefined) {
-                return; 
-            }
-
-            executeManualIllustration(mesId, instruction);
-        });
-
-    $mesBlock.find('.extraMesButtons').append($btn);
-}
-
-async function executeManualIllustration(mesId, userNote) {
-    const context = getContext();
-    const chatMsg = context.chat[mesId];
-    if (!chatMsg) return;
-
-    const settings = extension_settings[extensionName].illustration;
-    const count = parseInt(settings.count) || 1;
-    const prefill = settings.prefill || "";
-
-    let systemPromptToUse = settings.systemPrompt;
-
     const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
+    let finalPrompt = extension_settings[extensionName].promptInjection.prompt;
+
     if (charId !== undefined && charId !== -1 && characters[charId]) {
         const avatarFile = characters[charId].avatar;
-        const charPrompts = extension_settings[extensionName].characterPrompts?.[avatarFile] || [];
+        const linkedPresetName = extension_settings[extensionName].linkedPresets[avatarFile];
 
-        for (let i = 0; i < 6; i++) {
-            const placeholder = `{autopic_char${i + 1}}`;
+        if (linkedPresetName && extension_settings[extensionName].promptPresets[linkedPresetName]) {
+            finalPrompt = extension_settings[extensionName].promptPresets[linkedPresetName];
+        }
+
+        const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
+
+        for (let i = 1; i <= 6; i++) {
+            const placeholder = `{autopic_char${i}}`;
+            const item = charData[i - 1];
             let replacement = "";
-            if (charPrompts[i] && charPrompts[i].enabled !== false) {
-                replacement = charPrompts[i].prompt || "";
+
+            if (item && item.enabled !== false && item.prompt && item.prompt.trim()) {
+                replacement = item.prompt;
             }
-            systemPromptToUse = systemPromptToUse.split(placeholder).join(replacement);
+
+            finalPrompt = finalPrompt.split(placeholder).join(replacement);
         }
     } else {
         for (let i = 1; i <= 6; i++) {
-            systemPromptToUse = systemPromptToUse.split(`{autopic_char${i}}`).join("");
+            finalPrompt = finalPrompt.split(`{autopic_char${i}}`).join("");
         }
     }
 
-    const finalPrompt = `### Instructions:
-${systemPromptToUse}
-
-### Target Message Content to Analyze:
-"${chatMsg.mes}"
-
-### Constraints:
-1. Focus ONLY on the content provided above.
-${userNote ? `2. User Special Request: ${userNote}` : ''}
-3. Output exactly ${count} <pic prompt="..."> tags.
-4. No introduction, no explanation, no conversation. Only the tags.`;
-
-    toastr.info(`${mesId}번 메시지로 삽화 태그를 생성 중...`, "AutoPic");
-
-    try {
-        let aiResponse = "";
-        let promptToSend = finalPrompt;
-
-        if (settings.source === 'profile') {
-            console.log(`[AutoPic] Profile 모드 선택됨: 현재 활성화된 API 설정을 사용하여 생성합니다.`);
-        }
-
-        if (prefill) {
-            promptToSend += `\n\n${prefill}`; 
-        }
-        
-        aiResponse = await generateRaw({
-            prompt: promptToSend,
-            quiet: true,
-            skipWIAN: true,
-            skipAN: true,
-            maxContext: 0 
-        });
-        
-        if (prefill && aiResponse && !aiResponse.includes(prefill) && !aiResponse.includes('<pic')) {
-             aiResponse = prefill + aiResponse;
-        }
-
-        if (!aiResponse) throw new Error("AI 응답이 비어있습니다.");
-
-        console.log("[AutoPic] Raw AI Response:", aiResponse);
-
-        const allMatches = aiResponse.match(/<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g) || [];
-        
-        if (allMatches.length === 0) {
-            toastr.warning("AI가 태그를 생성하지 않았습니다.");
-            return;
-        }
-
-        const selectedTags = allMatches.slice(0, count).join('\n');
-        
-        chatMsg.mes += "\n" + selectedTags;
-        updateMessageBlock(mesId, chatMsg);
-        
-        await context.saveChat();
-        
-        await processAutoPic(mesId);
-
-    } catch (err) {
-        console.error("AutoPic 수동 생성 오류:", err);
-        toastr.error("오류 발생: " + err.message);
-    }
+    return finalPrompt;
 }
-
-async function processAutoPic(mesId) {
-    const context = getContext();
-    const message = context.chat[mesId];
-    if (!message || message.is_user) return;
-
-    const insertType = extension_settings[extensionName].insertType;
-    if (insertType === INSERT_TYPE.DISABLED) return;
-
-    let regex;
-    try {
-        let rawRegex = regexFromString(extension_settings[extensionName].promptInjection.regex);
-        regex = new RegExp(rawRegex.source, rawRegex.flags.includes('g') ? rawRegex.flags : rawRegex.flags + 'g');
-    } catch (e) {
-        regex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g;
-    }
-
-    const matches = [...message.mes.matchAll(regex)];
-    if (matches.length === 0) return;
-
-    try {
-        const total = matches.length;
-        
-        toastr.info(`${total}개의 이미지 생성을 시작합니다...`, "AutoPic");
-        
-        if (!message.extra) message.extra = {};
-        if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
-        
-        let hasChanged = false;
-        let lastImageResult = null;
-        let lastPromptUsed = "";
-        let updatedMes = message.mes;
-
-        for (let i = 0; i < matches.length; i++) {
-            const match = matches[i];
-            const fullTag = match[0];
-            const prompt = match[1] || '';
-            if (!prompt.trim()) continue;
-
-            const result = await SlashCommandParser.commands['sd'].callback({ quiet: 'true' }, prompt.trim());
-            
-            if (typeof result === 'string' && result.trim().length > 0 && !result.startsWith('Error')) {
-                hasChanged = true;
-                lastImageResult = result;
-                lastPromptUsed = prompt.trim();
-                
-                if (insertType === INSERT_TYPE.REPLACE) {
-                    const tagId = `tag-${Date.now()}-${i}`; 
-                    const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
-                    updatedMes = updatedMes.replace(fullTag, () => newTag);
-                } else if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.NEW_MESSAGE) {
-                    message.extra.image_swipes.push(result);
-                }
-            }
-        }
-
-        if (hasChanged) {
-            message.extra.title = lastPromptUsed;
-            const messageElement = $(`.mes[mesid="${mesId}"]`);
-
-            if (insertType === INSERT_TYPE.REPLACE) {
-                message.mes = updatedMes;
-            } else if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.NEW_MESSAGE) {
-                message.extra.image = lastImageResult; 
-                message.extra.inline_image = true;
-                appendMediaToMessage(message, messageElement);
-            }
-            
-            updateMessageBlock(mesId, message);
-            await context.saveChat();
-            
-            await eventSource.emit(event_types.MESSAGE_UPDATED, mesId);
-            await eventSource.emit(event_types.MESSAGE_RENDERED, mesId);
-            toastr.success(`이미지 생성 완료! (메시지 #${mesId})`);
-        }
-    } catch (e) {
-        console.error("[AutoPic] 생성 오류:", e);
-    }
-}
-
 
 eventSource.on(
     event_types.CHAT_COMPLETION_PROMPT_READY,
@@ -958,41 +790,14 @@ eventSource.on(
                 return;
             }
 
-            let prompt = extension_settings[extensionName].promptInjection.prompt;
-            if (!prompt) return;
-
-            const context = getContext();
-            const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
-
-            if (charId !== undefined && charId !== -1 && characters[charId]) {
-                const avatarFile = characters[charId].avatar;
-                const charPrompts = extension_settings[extensionName].characterPrompts?.[avatarFile] || [];
-
-                for (let i = 0; i < 6; i++) {
-                    const placeholder = `{autopic_char${i + 1}}`;
-                    let replacement = "";
-
-                    if (charPrompts[i] && charPrompts[i].enabled !== false) {
-                        replacement = charPrompts[i].prompt || "";
-                    }
-
-                    prompt = prompt.split(placeholder).join(replacement);
-                }
-            } else {
-                for (let i = 1; i <= 6; i++) {
-                    prompt = prompt.split(`{autopic_char${i}}`).join("");
-                }
-            }
-
+            const prompt = getFinalPrompt(); 
             const depth = extension_settings[extensionName].promptInjection.depth || 0;
             const role = extension_settings[extensionName].promptInjection.position.replace('deep_', '') || 'system';
 
-            if (prompt.trim()) {
-                if (depth === 0) {
-                    eventData.chat.push({ role: role, content: prompt });
-                } else {
-                    eventData.chat.splice(-depth, 0, { role: role, content: prompt });
-                }
+            if (depth === 0) {
+                eventData.chat.push({ role: role, content: prompt });
+            } else {
+                eventData.chat.splice(-depth, 0, { role: role, content: prompt });
             }
         } catch (error) {
             console.error(`[${extensionName}] Prompt injection error:`, error);
@@ -1314,7 +1119,7 @@ $(function () {
 
         $('#extensions-settings-button').on('click', () => setTimeout(updateUI, 200));
 
-        eventSource.on(event_types.MESSAGE_RENDERED, (mesId) => {
+		eventSource.on(event_types.MESSAGE_RENDERED, (mesId) => {
             const context = getContext();
             const message = context.chat[mesId];
             if (message && !message.is_user && !message.extra?.title) {
@@ -1329,9 +1134,6 @@ $(function () {
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
-            
-            const $mesBlock = $(`.mes[mesid="${mesId}"]`);
-            addAutopicIllustrationButton($mesBlock); 
             setTimeout(() => attachTagControls(mesId), 150);
         });
 
@@ -1350,11 +1152,13 @@ $(function () {
             addRerollButtonToMessage(mesId);
             addMobileToggleToMessage(mesId);
             attachSwipeRerollListeners(mesId);
-            
-            const $mesBlock = $(`.mes[mesid="${mesId}"]`);
-            addAutopicIllustrationButton($mesBlock); 
             setTimeout(() => attachTagControls(mesId), 150);
         });
+
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+			renderCharacterLinkUI();
+			renderCharacterPrompts();
+		});
 
         /* -------------------------------------------------------
          * 모바일 전용: 돋보기 차단 및 UI 토글 로직 (Capture phase)
@@ -1683,17 +1487,19 @@ async function handleReroll(mesId, currentPrompt) {
         if (finalPrompt && finalPrompt.trim()) {
             try {
                 toastr.info("이미지 생성 중...");
-                const resultUrl = await SlashCommandParser.commands['sd'].callback({ quiet: 'true' }, finalPrompt.trim());
+                const resultUrl = await sdCallWithRescale({ quiet: 'true' }, finalPrompt.trim());
                 
                 if (typeof resultUrl === 'string' && !resultUrl.startsWith('Error')) {
                     const currentInsertType = extension_settings[extensionName].insertType;
 
+                    // [핵심 수정] 태그 치환 모드일 때만 본문(message.mes)을 수정함
                     if (currentInsertType === INSERT_TYPE.REPLACE && targetItem.originalTag) {
                         const idMatch = targetItem.originalTag.match(/data-autopic-id="([^"]*)"/);
                         const idAttr = idMatch ? ` data-autopic-id="${idMatch[1]}"` : ` data-autopic-id="tag-${Date.now()}"`;
                         const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(finalPrompt.trim())}" alt="${escapeHtmlAttribute(finalPrompt.trim())}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
                     } 
+                    // [핵심 수정] 그 외(INLINE 등) 모드에서는 본문은 절대 건드리지 않고 갤러리(extra)만 수정
                     else {
                         if (!message.extra) message.extra = {};
                         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
@@ -1727,6 +1533,16 @@ async function handleReroll(mesId, currentPrompt) {
     }
 }
 
+/**
+ * /sd 커맨드 실행.
+ * cfg_rescale은 fetch 인터셉터(installNaiFetchInterceptor)가
+ * /api/novelai/generate-image 요청을 가로채서 자동으로 주입하므로
+ * 여기서는 별도 처리가 필요 없다.
+ */
+async function sdCallWithRescale(args, prompt) {
+    return await SlashCommandParser.commands['sd'].callback(args, prompt);
+}
+
 function applyTheme(theme) {
     const container = $('#autopic_settings_container');
     if (!container.length) return;
@@ -1736,9 +1552,95 @@ function applyTheme(theme) {
 }
 eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
     if (!extension_settings[extensionName] || extension_settings[extensionName].insertType === INSERT_TYPE.DISABLED) return;
+
     const context = getContext();
-    const lastIdx = context.chat.length - 1;
-    setTimeout(() => processAutoPic(lastIdx), 200);
+    const message = context.chat[context.chat.length - 1];
+    if (!message || message.is_user) return;
+
+    let regex;
+    try {
+        let rawRegex = regexFromString(extension_settings[extensionName].promptInjection.regex);
+        regex = new RegExp(rawRegex.source, rawRegex.flags.includes('g') ? rawRegex.flags : rawRegex.flags + 'g');
+    } catch (e) {
+        regex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g;
+    }
+
+    const matches = [...message.mes.matchAll(regex)];
+    if (matches.length === 0) return;
+
+    setTimeout(async () => {
+        try {
+            const currentIdx = context.chat.indexOf(message);
+            if (currentIdx === -1) return; 
+
+            const insertType = extension_settings[extensionName].insertType;
+            const total = matches.length;
+            
+            toastr.info(`${total}개의 이미지 생성을 시작합니다...`, "AutoPic", { "progressBar": true });
+            
+            if (!message.extra) message.extra = {};
+            if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
+            
+            const messageElement = $(`.mes[mesid="${currentIdx}"]`);
+            let hasChanged = false;
+            let lastImageResult = null;
+            let lastPromptUsed = "";
+            let updatedMes = message.mes;
+
+            for (let i = 0; i < matches.length; i++) {
+                toastr.info(`이미지 생성 중... (${i + 1} / ${total})`, "AutoPic", { "timeOut": 2000 });
+
+                const match = matches[i];
+                const fullTag = match[0];
+                const prompt = match[1] || '';
+                
+                if (!prompt.trim()) continue;
+
+                const result = await sdCallWithRescale({ quiet: 'true' }, prompt.trim());
+                
+                if (typeof result === 'string' && result.trim().length > 0 && !result.startsWith('Error')) {
+                    hasChanged = true;
+                    lastImageResult = result;
+                    lastPromptUsed = prompt.trim();
+                    
+                    if (insertType === INSERT_TYPE.INLINE) {
+                        message.extra.image_swipes.push(result);
+                    } 
+                    else if (insertType === INSERT_TYPE.REPLACE) {
+                        const tagId = `tag-${Date.now()}-${i}`; 
+                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
+                        updatedMes = updatedMes.replace(fullTag, () => newTag);
+                    }
+                } else {
+                    toastr.error(`${i + 1}번째 이미지 생성에 실패했습니다.`);
+                }
+            }
+
+            if (hasChanged) {
+                message.extra.title = lastPromptUsed;
+
+                if (insertType === INSERT_TYPE.INLINE) {
+                    message.extra.image = lastImageResult; 
+                    message.extra.inline_image = true;
+                    appendMediaToMessage(message, messageElement);
+                } 
+                else if (insertType === INSERT_TYPE.REPLACE) {
+                    message.mes = updatedMes;
+                }
+                
+                updateMessageBlock(currentIdx, message);
+                await context.saveChat();
+                
+                await eventSource.emit(event_types.MESSAGE_UPDATED, currentIdx);
+                await eventSource.emit(event_types.MESSAGE_RENDERED, currentIdx);
+                
+                toastr.success(`총 ${total}개의 이미지 생성 및 저장 완료!`);
+            }
+        } catch (e) { 
+            console.error("[AutoPic] 오류:", e); 
+            toastr.error("이미지 생성 과정에서 오류가 발생했습니다.");
+        }
+    }, 200);
 });
 
 async function attachTagControls(mesId) {
@@ -1823,29 +1725,4 @@ $(document).off('click', '.reroll-trigger').on('click', '.reroll-trigger', funct
     const mesId = $(this).data('mesid');
     const prompt = $(this).data('prompt');
     handleReroll(mesId, prompt);
-});
-
-$(document).ready(() => {
-    $("#chat .mes").each(function () {
-        addAutopicIllustrationButton($(this));
-    });
-
-    initializeAllTagControls();
-
-    const chatBody = document.getElementById('chat');
-    if (chatBody) {
-        const chatObserver = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                $(mutation.addedNodes).each(function() {
-                    const $node = $(this);
-                    if ($node.hasClass('mes')) {
-                        addAutopicIllustrationButton($node);
-                        const newMesId = $node.attr('mesid');
-                        if(newMesId) setTimeout(() => attachTagControls(newMesId), 300);
-                    }
-                });
-            });
-        });
-        chatObserver.observe(chatBody, { childList: true, subtree: true });
-    }
 });
