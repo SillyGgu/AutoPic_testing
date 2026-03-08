@@ -30,12 +30,25 @@ const extensionFolderPath = `/scripts/extensions/third-party/${extensionName}`;
                 const body = JSON.parse(init.body);
                 const cfg  = getNaiParams()?.cfg_rescale ?? 0;
 
-                // cfg_rescale 주입 후 AutoPic 프록시로 리다이렉트
                 body.cfg_rescale = cfg;
                 console.log('[AutoPic Interceptor] cfg_rescale 주입:', cfg, '→ 프록시로 리다이렉트');
 
                 const newInit = { ...init, body: JSON.stringify(body) };
-                return _fetch('/api/plugins/autopic/generate-image', newInit, ...rest);
+                const proxyResponse = await _fetch('/api/plugins/autopic/generate-image', newInit, ...rest);
+
+                // 프록시 응답을 클론해서 PROHIBITED_CONTENT 여부 확인
+                const cloned = proxyResponse.clone();
+                try {
+                    const json = await cloned.json();
+                    if (json && json.statusCode === 400 && json.message && json.message.includes('PROHIBITED_CONTENT')) {
+                        console.warn('[AutoPic Interceptor] PROHIBITED_CONTENT 감지 → 원본 경로로 fallback 재시도');
+                        return _fetch(input, init, ...rest);
+                    }
+                } catch (_) {
+                    // JSON 파싱 실패 시 그냥 원본 응답 반환
+                }
+
+                return proxyResponse;
             } catch (e) {
                 console.warn('[AutoPic Interceptor] 파싱 실패, 원본 요청 통과:', e);
             }
@@ -795,7 +808,8 @@ eventSource.on(
             const role = extension_settings[extensionName].promptInjection.position.replace('deep_', '') || 'system';
 
             if (depth === 0) {
-                eventData.chat.push({ role: role, content: prompt });
+                // depth=0이면 system 프롬프트를 맨 앞(index 0)에 삽입
+                eventData.chat.unshift({ role: role, content: prompt });
             } else {
                 eventData.chat.splice(-depth, 0, { role: role, content: prompt });
             }
