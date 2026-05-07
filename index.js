@@ -1362,11 +1362,23 @@ $(function () {
             const message = context.chat[mesId];
             if (message && !message.is_user && !message.extra?.title) {
                 const picRegex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/i;
-                const imgRegex = /<img[^>]*\stitle="([^"]*)"[^>]*?>/i;
-                const match = message.mes.match(picRegex) || message.mes.match(imgRegex);
-                if (match && match[1]) {
+                const picMatch = message.mes.match(picRegex);
+                if (picMatch && picMatch[1]) {
                     if (!message.extra) message.extra = {};
-                    message.extra.title = match[1];
+                    message.extra.title = picMatch[1];
+                } else {
+                    // img 태그의 title은 내부에 따옴표가 포함될 수 있으므로 DOM 파싱 사용
+                    const imgTagMatch = message.mes.match(/<img[^>]+>/i);
+                    if (imgTagMatch) {
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = imgTagMatch[0];
+                        const imgEl = tempDiv.querySelector('img');
+                        const titleVal = imgEl ? (imgEl.getAttribute('title') || imgEl.getAttribute('alt') || '') : '';
+                        if (titleVal) {
+                            if (!message.extra) message.extra = {};
+                            message.extra.title = titleVal;
+                        }
+                    }
                 }
             }
             addRerollButtonToMessage(mesId);
@@ -1647,8 +1659,12 @@ async function handleReroll(mesId, currentPrompt) {
     let imgMatches = [...message.mes.matchAll(imgRegex)];
     imgMatches.forEach(m => {
         const fullTag = m[0];
-        const titleMatch = fullTag.match(/title="([^"]*)"/i);
-        const prompt = titleMatch ? titleMatch[1] : "";
+        // title 속성 안에 ref="..." 같은 따옴표가 포함될 수 있으므로
+        // DOM 파싱으로 안전하게 추출한다
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = fullTag;
+        const imgEl = tempDiv.querySelector('img');
+        const prompt = imgEl ? (imgEl.getAttribute('title') || imgEl.getAttribute('alt') || '') : '';
         
         if (prompt) {
             if (!foundItems.some(item => item.originalTag === fullTag)) {
@@ -1699,7 +1715,7 @@ async function handleReroll(mesId, currentPrompt) {
                     <input type="radio" name="reroll_prompt_choice" class="reroll_radio" id="prompt_choice_${idx}" value="${idx}" ${isChecked}>
                     <label for="prompt_choice_${idx}" style="font-weight:bold; color:#4a90e2; cursor:pointer;">#${idx + 1} ${typeLabel}</label>
                 </div>
-                <textarea class="reroll_textarea text_pole" data-idx="${idx}" rows="3" style="width: 100%; background:#111; color:#fff; border:1px solid #444; border-radius:5px; padding:8px;">${escapeHtmlAttribute(String(item.prompt))}</textarea>
+                <textarea class="reroll_textarea text_pole" data-idx="${idx}" rows="3" style="width: 100%; background:#111; color:#fff; border:1px solid #444; border-radius:5px; padding:8px;">${String(item.prompt)}</textarea>
             </div>
         `;
     });
@@ -1735,14 +1751,17 @@ async function handleReroll(mesId, currentPrompt) {
                 if (typeof resultUrl === 'string' && !resultUrl.startsWith('Error')) {
                     const currentInsertType = extension_settings[extensionName].insertType;
 
-                    // [핵심 수정] 태그 치환 모드일 때만 본문(message.mes)을 수정함
+
                     if (currentInsertType === INSERT_TYPE.REPLACE && targetItem.originalTag) {
                         const idMatch = targetItem.originalTag.match(/data-autopic-id="([^"]*)"/);
                         const idAttr = idMatch ? ` data-autopic-id="${idMatch[1]}"` : ` data-autopic-id="tag-${Date.now()}"`;
-                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(generationPrompt.editText)}" alt="${escapeHtmlAttribute(generationPrompt.editText)}">`;
+                        // 다음 재생성에서도 구조 전체를 복원할 수 있도록
+                        // editText(<pic>...</pic> 원본)를 title에 보존한다
+                        const titleForTag = generationPrompt.editText || generationPrompt.prompt || '';
+                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(titleForTag)}" alt="${escapeHtmlAttribute(titleForTag)}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
                     } 
-                    // [핵심 수정] 그 외(INLINE 등) 모드에서는 본문은 절대 건드리지 않고 갤러리(extra)만 수정
+
                     else {
                         if (!message.extra) message.extra = {};
                         if (!Array.isArray(message.extra.image_swipes)) message.extra.image_swipes = [];
