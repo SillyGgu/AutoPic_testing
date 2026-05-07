@@ -15,6 +15,41 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 const extensionName = 'AutoPic_testing';
 const extensionFolderPath = `/scripts/extensions/third-party/${extensionName}`;
 
+function getCurrentAutopicCharacterPromptsForNai() {
+    try {
+        const context = getContext();
+        const charId = context.characterId ?? characters.findIndex(c => c.avatar === context.character?.avatar);
+
+        if (charId === undefined || charId === -1 || !characters[charId]) {
+            return [];
+        }
+
+        const avatarFile = characters[charId].avatar;
+        const charData = extension_settings[extensionName]?.characterPrompts?.[avatarFile];
+
+        if (!Array.isArray(charData)) {
+            return [];
+        }
+
+        return charData
+            .map((item, index) => ({
+                name: String(item?.name ?? '').trim(),
+                prompt: String(item?.prompt ?? '').trim(),
+                enabled: item?.enabled !== false,
+                source: 'autopic',
+                slot: index + 1,
+            }))
+            .filter(item => item.enabled && item.prompt);
+    } catch (error) {
+        console.warn('[AutoPic Interceptor] Failed to collect AutoPic character prompts:', error);
+        return [];
+    }
+}
+
+function shouldUseAutopicNaiProxy() {
+    return !!pendingNaiPayload || !!getNaiParams()?.useNaiRescale || getCurrentAutopicCharacterPromptsForNai().length > 0;
+}
+
 // ── NAI fetch 인터셉터 ────────────────────────────────────────
 // ST의 /api/novelai/generate-image 요청을 가로채서
 // AutoPic 프록시(/api/plugins/autopic/generate-image)로 리다이렉트한다.
@@ -25,13 +60,32 @@ const extensionFolderPath = `/scripts/extensions/third-party/${extensionName}`;
         const url = typeof input === 'string' ? input
             : (input instanceof Request ? input.url : String(input));
 
-        if (url.includes('/api/novelai/generate-image') && init?.body && getNaiParams()?.useNaiRescale) {
+        if (url.includes('/api/novelai/generate-image') && init?.body && shouldUseAutopicNaiProxy()) {
             try {
                 const body = JSON.parse(init.body);
                 const cfg  = getNaiParams()?.cfg_rescale ?? 0;
+                const autopicCharacterPrompts = pendingNaiPayload
+                    ? []
+                    : getCurrentAutopicCharacterPromptsForNai();
+                const existingCharacterPrompts = Array.isArray(body.characterPrompts) ? body.characterPrompts : [];
+                const pendingCharacterPrompts = Array.isArray(pendingNaiPayload?.characterPrompts)
+                    ? pendingNaiPayload.characterPrompts
+                    : [];
 
                 body.cfg_rescale = cfg;
+                if (pendingNaiPayload?.negative_prompt) {
+                    body.negative_prompt = [body.negative_prompt, pendingNaiPayload.negative_prompt]
+                        .filter(Boolean)
+                        .join(', ');
+                }
+                body.characterPrompts = [
+                    ...existingCharacterPrompts,
+                    ...pendingCharacterPrompts,
+                    ...autopicCharacterPrompts,
+                ];
                 console.log('[AutoPic Interceptor] cfg_rescale 주입:', cfg, '→ 프록시로 리다이렉트');
+
+                console.log('[AutoPic Interceptor] characterPrompts:', body.characterPrompts.length);
 
                 const newInit = { ...init, body: JSON.stringify(body) };
                 const proxyResponse = await _fetch('/api/plugins/autopic/generate-image', newInit, ...rest);
@@ -79,6 +133,8 @@ const INSERT_TYPE = {
     REPLACE: 'replace',
 };
 
+let pendingNaiPayload = null;
+
 /**
  * HTML 속성 값 안전 탈출
  */
@@ -92,6 +148,122 @@ function escapeHtmlAttribute(value) {
         .replace(/>/g, '&gt;');
 }
 
+function decodeHtmlAttribute(value) {
+    if (typeof value !== 'string') return '';
+
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+}
+
+function normalizeRefName(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function getTagContents(source, tagName) {
+    const regex = new RegExp(`<${tagName}\\b([^>]*)>([\\s\\S]*?)<\\/${tagName}>`, 'gi');
+    return [...String(source ?? '').matchAll(regex)].map(match => ({
+        attrs: match[1] || '',
+        content: decodeHtmlAttribute(match[2] || '').trim(),
+    }));
+}
+
+function getAttrValue(attrs, name) {
+    const regex = new RegExp(`${name}\\s*=\\s*["']([^"']*)["']`, 'i');
+    const match = String(attrs ?? '').match(regex);
+    return match ? decodeHtmlAttribute(match[1]).trim() : '';
+}
+
+function getCurrentAutopicCharacterLibraryForNai() {
+    const items = getCurrentAutopicCharacterPromptsForNai();
+    const byName = new Map();
+
+    for (const item of items) {
+        if (item.name) {
+            byName.set(normalizeRefName(item.name), item);
+        }
+    }
+
+    return { items, byName };
+}
+
+function parseStructuredPicBlock(fullTag, content) {
+    const scene = getTagContents(content, 'scene').map(item => item.content).filter(Boolean).join(', ');
+    const uc = getTagContents(content, 'uc').map(item => item.content).filter(Boolean).join(', ');
+    const charBlocks = getTagContents(content, 'char');
+    const { byName } = getCurrentAutopicCharacterLibraryForNai();
+    const characterPrompts = [];
+
+    for (const block of charBlocks) {
+        const ref = getAttrValue(block.attrs, 'ref') || getAttrValue(block.attrs, 'name');
+        const refKey = normalizeRefName(ref);
+        const extraPrompt = block.content;
+
+        if (refKey && byName.has(refKey)) {
+            const baseCharacter = byName.get(refKey);
+            characterPrompts.push({
+                name: baseCharacter.name,
+                prompt: [baseCharacter.prompt, extraPrompt].filter(Boolean).join(', '),
+                enabled: true,
+                source: 'autopic-ref',
+                ref,
+            });
+            continue;
+        }
+
+        if (refKey) {
+            console.warn(`[AutoPic] Character ref not found: "${ref}". Treating it as a normal character prompt.`);
+        }
+
+        if (extraPrompt) {
+            characterPrompts.push({
+                name: ref || '',
+                prompt: extraPrompt,
+                enabled: true,
+                source: refKey ? 'unmatched-ref' : 'structured',
+                ref,
+            });
+        }
+    }
+
+    return {
+        fullTag,
+        prompt: scene,
+        editText: fullTag,
+        naiPayload: {
+            prompt: scene,
+            negative_prompt: uc,
+            characterPrompts,
+        },
+        isStructured: true,
+    };
+}
+
+function extractPicRequests(messageText, fallbackRegex) {
+    const text = String(messageText ?? '');
+    const requests = [];
+    const structuredRegex = /<pic\b([^>]*)>([\s\S]*?)<\/pic>/gi;
+
+    for (const match of text.matchAll(structuredRegex)) {
+        const request = parseStructuredPicBlock(match[0], match[2] || '');
+        if (request.prompt || request.naiPayload.characterPrompts.length > 0) {
+            requests.push(request);
+        }
+    }
+
+    if (requests.length > 0) {
+        return requests;
+    }
+
+    return [...text.matchAll(fallbackRegex)].map(match => ({
+        fullTag: match[0],
+        prompt: decodeHtmlAttribute(match[1] || '').trim(),
+        editText: decodeHtmlAttribute(match[1] || '').trim(),
+        naiPayload: null,
+        isStructured: false,
+    }));
+}
+
 
 const defaultAutoPicSettings = {
     insertType: INSERT_TYPE.DISABLED,
@@ -99,18 +271,21 @@ const defaultAutoPicSettings = {
     theme: 'dark',
     promptInjection: {
         enabled: true,
-        prompt: `<image_generation>\nYou must insert a <pic prompt="example prompt"> at end of the reply. Prompts are used for stable diffusion image generation, based on the plot and character to output appropriate prompts to generate captivating images.\n</image_generation>`,
+        prompt: `<image_generation>\nWhen an image should be generated, insert exactly one structured image block at the end of the reply.\nUse this format:\n<pic>\n<scene>background, location, mood, composition, camera distance, lighting, non-character situation tags</scene>\n<char ref="registered character name">temporary expression, pose, action, outfit changes, interaction tags only</char>\n<char>full visual tags for an unregistered character</char>\n<uc>optional negative prompt tags only when needed</uc>\n</pic>\nRules:\n- Write image tags in English.\n- Do not write final NovelAI character prompts yourself; AutoPic will assemble them.\n- If a character is registered in AutoPic, use <char ref="name"> and do not repeat their base appearance tags.\n- If a character is not registered in AutoPic, use <char> with their full appearance tags.\n- Put background, place, mood, composition, count tags, and shared actions in <scene>.\n- Put character-specific pose, expression, action, and temporary clothing in the matching <char> block.\n- Do not use Character 1: labels inside <scene>.\n</image_generation>`,
         regex: '/<pic[^>]*\\sprompt="([^"]*)"[^>]*?>/g',
         position: 'deep_system',
         depth: 0, 
     },
     promptPresets: {
-        "Default": `<image_generation>\nYou must insert a <pic prompt="example prompt"> at end of the reply. Prompts are used for stable diffusion image generation, based on the plot and character to output appropriate prompts to generate captivating images.\n</image_generation>`
+        "Default": `<image_generation>\nWhen an image should be generated, insert exactly one structured image block at the end of the reply.\nUse this format:\n<pic>\n<scene>background, location, mood, composition, camera distance, lighting, non-character situation tags</scene>\n<char ref="registered character name">temporary expression, pose, action, outfit changes, interaction tags only</char>\n<char>full visual tags for an unregistered character</char>\n<uc>optional negative prompt tags only when needed</uc>\n</pic>\nRules:\n- Write image tags in English.\n- Do not write final NovelAI character prompts yourself; AutoPic will assemble them.\n- If a character is registered in AutoPic, use <char ref="name"> and do not repeat their base appearance tags.\n- If a character is not registered in AutoPic, use <char> with their full appearance tags.\n- Put background, place, mood, composition, count tags, and shared actions in <scene>.\n- Put character-specific pose, expression, action, and temporary clothing in the matching <char> block.\n- Do not use Character 1: labels inside <scene>.\n</image_generation>`
     },
     linkedPresets: {},
     characterPrompts: {},
     naiParams: { ...NAI_DEFAULTS },
 };
+
+const STRUCTURED_BLOCKS_PROMPT_VERSION = 2;
+const STRUCTURED_BLOCKS_PROMPT = `<image_generation>\nWhen an image should be generated, insert exactly one structured image block at the end of the reply.\nUse this exact format:\n<pic>\n<scene>character count tags, background, location, mood, composition, camera distance, lighting, shared actions, non-character situation tags</scene>\n<char ref="registered character name">temporary expression, pose, action, gaze, outfit changes, interaction tags only</char>\n<char>full visual tags for an unregistered character only</char>\n<uc>optional negative prompt tags only when needed</uc>\n</pic>\nRules:\n- Write image tags in English.\n- AutoPic assembles NovelAI character prompts. Do not write a final combined NovelAI prompt yourself.\n- If a character appears in <autopic_registered_characters>, you must use <char ref="exact name"> for that character.\n- For registered characters, never copy their base appearance tags into <scene>.\n- For registered characters, never repeat their base appearance tags inside the <char ref> body. Only write temporary expression, pose, action, gaze, outfit changes, and interaction tags there.\n- Put character count tags such as 1girl, 1boy, 2girls, 1girl 1boy in <scene>.\n- Put background, place, mood, composition, camera distance, lighting, and shared actions in <scene>.\n- Use plain <char> only for unregistered characters, and include their full visual tags there.\n- Do not use Character 1: labels.\n- Do not use the old <pic prompt="..."> format.\n</image_generation>`;
 function updateUI() {
     $('#autopic_menu_item').toggleClass(
         'selected',
@@ -173,6 +348,16 @@ async function loadSettings() {
         if (!extension_settings[extensionName].promptPresets) {
             extension_settings[extensionName].promptPresets = JSON.parse(JSON.stringify(defaultAutoPicSettings.promptPresets));
         }
+        if (
+            !extension_settings[extensionName].promptPresets["Structured Blocks"] ||
+            extension_settings[extensionName].structuredBlocksPromptVersion !== STRUCTURED_BLOCKS_PROMPT_VERSION
+        ) {
+            extension_settings[extensionName].promptPresets["Structured Blocks"] = STRUCTURED_BLOCKS_PROMPT;
+            extension_settings[extensionName].structuredBlocksPromptVersion = STRUCTURED_BLOCKS_PROMPT_VERSION;
+        }
+        if (!extension_settings[extensionName].promptPresets["Structured Blocks"]) {
+            extension_settings[extensionName].promptPresets["Structured Blocks"] = defaultAutoPicSettings.promptInjection.prompt;
+        }
         if (!extension_settings[extensionName].linkedPresets) {
             extension_settings[extensionName].linkedPresets = {};
         }
@@ -189,6 +374,16 @@ async function loadSettings() {
                 extension_settings[extensionName].naiParams.useNaiRescale = false;
             }
         }
+    }
+    if (!extension_settings[extensionName].promptPresets) {
+        extension_settings[extensionName].promptPresets = {};
+    }
+    if (
+        !extension_settings[extensionName].promptPresets["Structured Blocks"] ||
+        extension_settings[extensionName].structuredBlocksPromptVersion !== STRUCTURED_BLOCKS_PROMPT_VERSION
+    ) {
+        extension_settings[extensionName].promptPresets["Structured Blocks"] = STRUCTURED_BLOCKS_PROMPT;
+        extension_settings[extensionName].structuredBlocksPromptVersion = STRUCTURED_BLOCKS_PROMPT_VERSION;
     }
     updateUI();
 }
@@ -521,16 +716,23 @@ function renderCharacterPrompts() {
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <label class="gen-checkbox-label" style="margin:0; cursor:pointer; display:flex; align-items:center; gap:8px;">
                         <input type="checkbox" class="char-enabled-checkbox" data-index="${index}" ${isEnabled ? 'checked' : ''}>
-                        <span style="font-weight:bold; font-size:0.8rem; color:var(--ap-accent);">#${slotNum} - {autopic_char${slotNum}}</span>
+                        <span style="font-weight:bold; font-size:0.8rem; color:var(--ap-accent);">#${slotNum} - {autopic_char${slotNum}} - ${escapeHtmlAttribute(item.name || 'unnamed')}</span>
                     </label>
                     <button class="remove-char-prompt-btn gen-btn gen-btn-red" data-index="${index}" style="padding:2px 8px; font-size:0.7rem;">삭제</button>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:8px;">
+                    <input class="gen-custom-input char-name-input" data-index="${index}" value="${escapeHtmlAttribute(item.name || '')}" placeholder="Reference name for &lt;char ref=&quot;name&quot;&gt;">
                     <textarea class="gen-custom-input char-prompt-input" data-index="${index}" rows="2" placeholder="캐릭터 외형 프롬프트" style="resize: vertical;">${item.prompt || ''}</textarea>
                 </div>
             </div>
         `;
         $list.append(html);
+    });
+
+    $('.char-name-input').off('input').on('input', function() {
+        const idx = $(this).data('index');
+        charData[idx].name = $(this).val();
+        saveSettingsDebounced();
     });
 
     $('.char-prompt-input').off('input').on('input', function() {
@@ -572,7 +774,7 @@ $(document).off('click', '#add_char_prompt_btn').on('click', '#add_char_prompt_b
         return;
     }
 
-    extension_settings[extensionName].characterPrompts[avatarFile].push({ prompt: '', enabled: true });
+    extension_settings[extensionName].characterPrompts[avatarFile].push({ name: '', prompt: '', enabled: true });
     saveSettingsDebounced();
     renderCharacterPrompts();
 });
@@ -759,6 +961,27 @@ function updatePresetSelect(forceSelectedName = null) {
     }
 }
 
+function buildAvailableCharacterRefsPrompt(charData) {
+    const refs = Array.isArray(charData)
+        ? charData
+            .map((item, index) => ({
+                name: String(item?.name ?? '').trim(),
+                prompt: String(item?.prompt ?? '').trim(),
+                enabled: item?.enabled !== false,
+                slot: index + 1,
+            }))
+            .filter(item => item.enabled && item.name && item.prompt)
+        : [];
+
+    if (refs.length === 0) {
+        return '';
+    }
+
+    const lines = refs.map(item => `- ${item.name}: ${item.prompt}`);
+
+    return `\n\n<autopic_registered_characters>\nAvailable registered character refs. Use these names exactly in <char ref=\"name\">. Do not copy these base appearance tags into <scene> or into the <char> body.\n${lines.join('\n')}\n</autopic_registered_characters>`;
+}
+
 function getFinalPrompt() {
     const context = getContext();
     const charId = context.characterId ?? (characters.findIndex(c => c.avatar === context.character?.avatar));
@@ -773,6 +996,7 @@ function getFinalPrompt() {
         }
 
         const charData = extension_settings[extensionName].characterPrompts[avatarFile] || [];
+        finalPrompt += buildAvailableCharacterRefsPrompt(charData);
 
         for (let i = 1; i <= 6; i++) {
             const placeholder = `{autopic_char${i}}`;
@@ -1497,11 +1721,16 @@ async function handleReroll(mesId, currentPrompt) {
     if (result) {
         const finalPrompt = editedPrompts[selectedIdx];
         const targetItem = foundItems[selectedIdx];
+        const generationPrompt = preparePromptForGeneration(finalPrompt);
 
-        if (finalPrompt && finalPrompt.trim()) {
+        if (generationPrompt.prompt || generationPrompt.naiPayload?.characterPrompts?.length) {
             try {
                 toastr.info("이미지 생성 중...");
-                const resultUrl = await sdCallWithRescale({ quiet: 'true' }, finalPrompt.trim());
+                const resultUrl = await sdCallWithRescale(
+                    { quiet: 'true' },
+                    generationPrompt.prompt,
+                    generationPrompt.naiPayload,
+                );
                 
                 if (typeof resultUrl === 'string' && !resultUrl.startsWith('Error')) {
                     const currentInsertType = extension_settings[extensionName].insertType;
@@ -1510,7 +1739,7 @@ async function handleReroll(mesId, currentPrompt) {
                     if (currentInsertType === INSERT_TYPE.REPLACE && targetItem.originalTag) {
                         const idMatch = targetItem.originalTag.match(/data-autopic-id="([^"]*)"/);
                         const idAttr = idMatch ? ` data-autopic-id="${idMatch[1]}"` : ` data-autopic-id="tag-${Date.now()}"`;
-                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(finalPrompt.trim())}" alt="${escapeHtmlAttribute(finalPrompt.trim())}">`;
+                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(generationPrompt.editText)}" alt="${escapeHtmlAttribute(generationPrompt.editText)}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
                     } 
                     // [핵심 수정] 그 외(INLINE 등) 모드에서는 본문은 절대 건드리지 않고 갤러리(extra)만 수정
@@ -1524,7 +1753,7 @@ async function handleReroll(mesId, currentPrompt) {
                             message.extra.image_swipes.push(resultUrl);
                         }
                         message.extra.image = resultUrl;
-                        message.extra.title = finalPrompt.trim();
+                        message.extra.title = generationPrompt.editText;
                         message.extra.inline_image = true;
                     }
 
@@ -1553,8 +1782,36 @@ async function handleReroll(mesId, currentPrompt) {
  * /api/novelai/generate-image 요청을 가로채서 자동으로 주입하므로
  * 여기서는 별도 처리가 필요 없다.
  */
-async function sdCallWithRescale(args, prompt) {
-    return await SlashCommandParser.commands['sd'].callback(args, prompt);
+async function sdCallWithRescale(args, prompt, naiPayload = null) {
+    const previousPendingNaiPayload = pendingNaiPayload;
+    pendingNaiPayload = naiPayload;
+
+    try {
+        return await SlashCommandParser.commands['sd'].callback(args, prompt);
+    } finally {
+        pendingNaiPayload = previousPendingNaiPayload;
+    }
+}
+
+function preparePromptForGeneration(promptText) {
+    const text = String(promptText ?? '').trim();
+    const structuredRequests = extractPicRequests(text, /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g)
+        .filter(request => request.isStructured);
+
+    if (structuredRequests.length > 0) {
+        const request = structuredRequests[0];
+        return {
+            prompt: request.prompt,
+            naiPayload: request.naiPayload,
+            editText: request.editText,
+        };
+    }
+
+    return {
+        prompt: text,
+        naiPayload: null,
+        editText: text,
+    };
 }
 
 function applyTheme(theme) {
@@ -1579,8 +1836,8 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         regex = /<pic[^>]*\sprompt="([^"]*)"[^>]*?>/g;
     }
 
-    const matches = [...message.mes.matchAll(regex)];
-    if (matches.length === 0) return;
+    const picRequests = extractPicRequests(message.mes, regex);
+    if (picRequests.length === 0) return;
 
     setTimeout(async () => {
         try {
@@ -1588,7 +1845,7 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
             if (currentIdx === -1) return; 
 
             const insertType = extension_settings[extensionName].insertType;
-            const total = matches.length;
+            const total = picRequests.length;
             
             toastr.info(`${total}개의 이미지 생성을 시작합니다...`, "AutoPic", { "progressBar": true });
             
@@ -1601,28 +1858,29 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
             let lastPromptUsed = "";
             let updatedMes = message.mes;
 
-            for (let i = 0; i < matches.length; i++) {
+            for (let i = 0; i < picRequests.length; i++) {
                 toastr.info(`이미지 생성 중... (${i + 1} / ${total})`, "AutoPic", { "timeOut": 2000 });
 
-                const match = matches[i];
-                const fullTag = match[0];
-                const prompt = match[1] || '';
+                const request = picRequests[i];
+                const fullTag = request.fullTag;
+                const prompt = request.prompt || '';
+                const editText = request.editText || prompt;
                 
-                if (!prompt.trim()) continue;
+                if (!prompt.trim() && !request.naiPayload?.characterPrompts?.length) continue;
 
-                const result = await sdCallWithRescale({ quiet: 'true' }, prompt.trim());
+                const result = await sdCallWithRescale({ quiet: 'true' }, prompt.trim(), request.naiPayload);
                 
                 if (typeof result === 'string' && result.trim().length > 0 && !result.startsWith('Error')) {
                     hasChanged = true;
                     lastImageResult = result;
-                    lastPromptUsed = prompt.trim();
+                    lastPromptUsed = editText.trim();
                     
                     if (insertType === INSERT_TYPE.INLINE) {
                         message.extra.image_swipes.push(result);
                     } 
                     else if (insertType === INSERT_TYPE.REPLACE) {
                         const tagId = `tag-${Date.now()}-${i}`; 
-                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(prompt)}" alt="${escapeHtmlAttribute(prompt)}">`;
+                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(editText)}" alt="${escapeHtmlAttribute(editText)}">`;
                         updatedMes = updatedMes.replace(fullTag, () => newTag);
                     }
                 } else {
