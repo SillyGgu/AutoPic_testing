@@ -1472,9 +1472,9 @@ $(function () {
             const mesId = $message.attr('mesid');
             
             if (mesId !== undefined) {
-                setTimeout(() => {
-                    attachTagControls(mesId);
-                }, 150);
+                // ST 스와이프 렌더링이 끝날 때까지 충분히 기다린 후 버튼 재부착
+                setTimeout(() => attachTagControls(mesId), 300);
+                setTimeout(() => attachTagControls(mesId), 700);
             }
         });
 
@@ -1630,6 +1630,7 @@ function attachSwipeRerollListeners(mesId) {
     });
 }
 async function handleReroll(mesId, currentPrompt) {
+    currentPrompt = decodeHtmlAttribute(String(currentPrompt ?? ''));
     if (!SlashCommandParser.commands['sd']) {
         toastr.error("Stable Diffusion extension not loaded.");
         return;
@@ -1758,7 +1759,7 @@ async function handleReroll(mesId, currentPrompt) {
                         // 다음 재생성에서도 구조 전체를 복원할 수 있도록
                         // editText(<pic>...</pic> 원본)를 title에 보존한다
                         const titleForTag = generationPrompt.editText || generationPrompt.prompt || '';
-                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${escapeHtmlAttribute(titleForTag)}" alt="${escapeHtmlAttribute(titleForTag)}">`;
+                        const newTag = `<img src="${escapeHtmlAttribute(resultUrl)}"${idAttr} title="${titleForTag.replace(/"/g, '&quot;')}">`;
                         message.mes = message.mes.replace(targetItem.originalTag, newTag);
                     } 
 
@@ -1899,7 +1900,7 @@ eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
                     } 
                     else if (insertType === INSERT_TYPE.REPLACE) {
                         const tagId = `tag-${Date.now()}-${i}`; 
-                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${escapeHtmlAttribute(editText)}" alt="${escapeHtmlAttribute(editText)}">`;
+                        const newTag = `<img src="${escapeHtmlAttribute(result)}" data-autopic-id="${tagId}" title="${editText.replace(/"/g, '&quot;')}">`;
                         updatedMes = updatedMes.replace(fullTag, () => newTag);
                     }
                 } else {
@@ -1964,17 +1965,11 @@ async function attachTagControls(mesId) {
 
             $img.wrap('<div class="autopic-tag-img-wrapper"></div>');
             
-            const $controls = $(`
-                <div class="autopic-tag-controls">
-                    <div class="autopic-control-btn reroll-trigger fa-solid fa-rotate interactable" 
-                         data-mesid="${mesId}" 
-                         data-prompt="${escapeHtmlAttribute(title)}" 
-                         title="Generate Another Image"
-                         role="button" 
-                         tabindex="0">
-                    </div>
-                </div>
-            `);
+            const $controls = $('<div class="autopic-tag-controls"></div>');
+            const $btn = $('<div class="autopic-control-btn reroll-trigger fa-solid fa-rotate interactable" title="Generate Another Image" role="button" tabindex="0"></div>');
+            $btn.attr('data-mesid', mesId);
+            $btn.attr('data-prompt', title);
+            $controls.append($btn);
             $img.after($controls);
         }
     });
